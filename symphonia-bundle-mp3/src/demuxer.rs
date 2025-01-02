@@ -48,7 +48,7 @@ pub struct MpaReader<'s> {
 }
 
 impl Scoreable for MpaReader<'_> {
-    fn score(mut src: ScopedStream<&mut MediaSourceStream<'_>>) -> Result<Score> {
+    async fn score(mut src: ScopedStream<&mut MediaSourceStream<'_>>) -> Result<Score> {
         // Read the sync word for the first (assumed) MPEG frame and try to parse it into a header.
         let sync1 = header::read_frame_header_word_no_sync(&mut src)?;
         let hdr1 = header::parse_frame_header(sync1)?;
@@ -62,7 +62,7 @@ impl Scoreable for MpaReader<'_> {
         }
 
         // Skip the frame body.
-        src.ignore_bytes(hdr1.frame_size as u64)?;
+        src.ignore_bytes(hdr1.frame_size as u64).await?;
 
         // Read another sync word for the second (assumed) MPEG frame.
         let sync2 = header::read_frame_header_word_no_sync(&mut src)?;

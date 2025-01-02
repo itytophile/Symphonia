@@ -5,6 +5,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use futures_util::future::BoxFuture;
+use futures_util::FutureExt;
 use symphonia_core::errors::{unsupported_error, Error};
 use symphonia_core::support_format;
 
@@ -15,11 +17,13 @@ use symphonia_core::codecs::CodecParameters;
 use symphonia_core::errors::{decode_error, seek_error, Result, SeekErrorKind};
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::well_known::FORMAT_ID_ADTS;
-use symphonia_core::formats::{prelude::*, FormatReaderInfo};
+use symphonia_core::formats::{prelude::*, AsyncFormatReader, FormatReaderInfo};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataLog};
 
+use std::future::Future;
 use std::io::{Seek, SeekFrom};
+use std::pin::Pin;
 
 use super::common::{map_to_channels, M4AType, AAC_CHANNELS, AAC_SAMPLE_RATES, M4A_TYPES};
 
@@ -46,8 +50,8 @@ pub struct AdtsReader<'s> {
 }
 
 impl<'s> AdtsReader<'s> {
-    pub fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
-        let header = AdtsHeader::read(&mut mss)?;
+    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+        let header = AdtsHeader::read(&mut mss).await?;
 
         // Rewind back to the start of the frame.
         mss.seek_buffered_rev(usize::from(header.header_len()));
@@ -84,25 +88,30 @@ impl<'s> AdtsReader<'s> {
 }
 
 impl Scoreable for AdtsReader<'_> {
-    fn score(mut src: ScopedStream<&mut MediaSourceStream<'_>>) -> Result<Score> {
-        // Read the first (assumed) ADTS header.
-        let hdr1 = AdtsHeader::read_no_resync(&mut src)?;
+    fn score<'a>(
+        mut src: ScopedStream<&'a mut MediaSourceStream<'_>>,
+    ) -> BoxFuture<'a, Result<Score>> {
+        async move {
+            // Read the first (assumed) ADTS header.
+            let hdr1 = AdtsHeader::read_no_resync(&mut src).await?;
 
-        // Since the first header was read successfully, this may be an ADTS audio format. However,
-        // if there is enough data left to read the frame body and another frame header, then a
-        // higher confidence may be gained. If there is not enough data left, return a partially
-        // confident score.
-        let payload_len = hdr1.payload_len();
+            // Since the first header was read successfully, this may be an ADTS audio format. However,
+            // if there is enough data left to read the frame body and another frame header, then a
+            // higher confidence may be gained. If there is not enough data left, return a partially
+            // confident score.
+            let payload_len = hdr1.payload_len();
 
-        if src.bytes_available() < u64::from(payload_len + AdtsHeader::SIZE_WITH_CRC) {
-            return Ok(Score::Supported(127));
+            if src.bytes_available() < u64::from(payload_len + AdtsHeader::SIZE_WITH_CRC) {
+                return Ok(Score::Supported(127));
+            }
+
+            src.ignore_bytes(u64::from(payload_len)).await?;
+
+            let _ = AdtsHeader::read_no_resync(&mut src).await?;
+
+            Ok(Score::Supported(255))
         }
-
-        src.ignore_bytes(u64::from(payload_len))?;
-
-        let _ = AdtsHeader::read_no_resync(&mut src)?;
-
-        Ok(Score::Supported(255))
+        .boxed()
     }
 }
 
@@ -131,40 +140,40 @@ impl AdtsHeader {
     pub const SIZE_WITH_CRC: u16 = Self::SIZE_NO_CRC + Self::CRC_SIZE;
 
     /// Read the body of a header at the current position of the reader.
-    fn read_body<B: ReadBytes>(reader: &mut B, has_crc: bool) -> Result<Self> {
+    async fn read_body<B: ReadBytes>(reader: &mut B, has_crc: bool) -> Result<Self> {
         // The length of the header.
         let len = if has_crc { Self::SIZE_WITH_CRC } else { Self::SIZE_NO_CRC };
 
         // Read the body of the header (no sync word).
         let mut buf = [0; 7];
-        reader.read_buf_exact(&mut buf[..usize::from(len - 2)])?;
+        reader.read_buf_exact(&mut buf[..usize::from(len - 2)]).await?;
 
         let mut bs = BitReaderLtr::new(&buf);
 
         // Profile.
-        let profile = M4A_TYPES[bs.read_bits_leq32(2)? as usize + 1];
+        let profile = M4A_TYPES[bs.read_bits_leq32(2).await? as usize + 1];
 
         // Sample rate index.
-        let sample_rate = match bs.read_bits_leq32(4)? as usize {
+        let sample_rate = match bs.read_bits_leq32(4).await? as usize {
             15 => return decode_error("adts: forbidden sample rate"),
             13 | 14 => return decode_error("adts: reserved sample rate"),
             idx => AAC_SAMPLE_RATES[idx],
         };
 
         // Private bit.
-        bs.ignore_bit()?;
+        bs.ignore_bit().await?;
 
         // Channel configuration.
-        let channels = match bs.read_bits_leq32(3)? {
+        let channels = match bs.read_bits_leq32(3).await? {
             0 => None,
             idx => map_to_channels(AAC_CHANNELS[idx as usize]),
         };
 
         // Originality, Home, Copyrighted ID bit, Copyright ID start bits. Only used for encoding.
-        bs.ignore_bits(4)?;
+        bs.ignore_bits(4).await?;
 
         // The frame length = sync word + header + payload.
-        let frame_len = bs.read_bits_leq32(13)? as u16;
+        let frame_len = bs.read_bits_leq32(13).await? as u16;
 
         // The frame length must be large enough for the header.
         if frame_len < len {
@@ -172,10 +181,10 @@ impl AdtsHeader {
         }
 
         // Buffer fullness.
-        let _fullness = bs.read_bits_leq32(11)?;
+        let _fullness = bs.read_bits_leq32(11).await?;
 
         // Number of raw data blocks (AAC packets).
-        let raw_data_blocks = bs.read_bits_leq32(2)? + 1;
+        let raw_data_blocks = bs.read_bits_leq32(2).await? + 1;
 
         if raw_data_blocks > 1 {
             // TODO: Support multiple AAC packets per ADTS packet.
@@ -183,7 +192,7 @@ impl AdtsHeader {
         }
 
         // The CRC, if the CRC is provided.
-        let crc = if has_crc { Some(bs.read_bits_leq32(16)? as u16) } else { None };
+        let crc = if has_crc { Some(bs.read_bits_leq32(16).await? as u16) } else { None };
 
         Ok(AdtsHeader { profile, channels, sample_rate, frame_len, crc })
     }
@@ -195,34 +204,34 @@ impl AdtsHeader {
     }
 
     /// Resync the reader to the next sync word.
-    fn sync<B: ReadBytes>(reader: &mut B) -> Result<u16> {
+    async fn sync<B: ReadBytes>(reader: &mut B) -> Result<u16> {
         let mut sync = 0;
 
         while !Self::is_sync_word(sync) {
-            sync = (sync << 8) | u16::from(reader.read_u8()?);
+            sync = (sync << 8) | u16::from(reader.read_u8().await?);
         }
 
         Ok(sync)
     }
 
     /// Read a header from the current position of the reader.
-    fn read_no_resync<B: ReadBytes>(reader: &mut B) -> Result<Self> {
-        let sync = reader.read_be_u16()?;
+    async fn read_no_resync<B: ReadBytes>(reader: &mut B) -> Result<Self> {
+        let sync = reader.read_be_u16().await?;
 
         if !Self::is_sync_word(sync) {
             return decode_error("adts: invalid frame sync word");
         }
 
         // "Protection absent" set to 0 if CRC is present.
-        Self::read_body(reader, sync & 1 == 0)
+        Self::read_body(reader, sync & 1 == 0).await
     }
 
     /// Resync the reader if required, and read a header.
-    fn read<B: ReadBytes>(reader: &mut B) -> Result<Self> {
-        let sync = AdtsHeader::sync(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B) -> Result<Self> {
+        let sync = AdtsHeader::sync(reader).await?;
 
         // "Protection absent" set to 0 if CRC is present.
-        Self::read_body(reader, sync & 1 == 0)
+        Self::read_body(reader, sync & 1 == 0).await
     }
 
     /// Get the length of the header including the sync word.
@@ -239,11 +248,11 @@ impl AdtsHeader {
 }
 
 impl ProbeableFormat<'_> for AdtsReader<'_> {
-    fn try_probe_new(
-        mss: MediaSourceStream<'_>,
+    fn try_probe_new<'s>(
+        mss: MediaSourceStream<'s>,
         opts: FormatOptions,
-    ) -> Result<Box<dyn FormatReader + '_>> {
-        Ok(Box::new(AdtsReader::try_new(mss, opts)?))
+    ) -> BoxFuture<'s, Result<Box<dyn FormatReader + 's>>> {
+        async move { Ok(Box::new(AdtsReader::try_new(mss, opts).await?) as Box<dyn FormatReader>) }.boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
@@ -279,10 +288,10 @@ impl FormatReaderInfo for AdtsReader<'_> {
     }
 }
 
-impl FormatReader for AdtsReader<'_> {
-    fn next_packet(&mut self) -> Result<Option<Packet>> {
+impl AsyncFormatReader for AdtsReader<'_> {
+    async fn next_packet(&mut self) -> Result<Option<Packet>> {
         // Parse the header to get the calculated frame size.
-        let header = match AdtsHeader::read(&mut self.reader) {
+        let header = match AdtsHeader::read(&mut self.reader).await {
             Ok(header) => header,
             Err(Error::IoError(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
                 // ADTS streams have no well-defined end, so when no more frames can be read,
@@ -302,11 +311,11 @@ impl FormatReader for AdtsReader<'_> {
             0,
             ts,
             SAMPLES_PER_AAC_PACKET,
-            self.reader.read_boxed_slice_exact(usize::from(header.payload_len()))?,
+            self.reader.read_boxed_slice_exact(usize::from(header.payload_len())).await?,
         )))
     }
 
-    fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
+    async fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
         // Get the timestamp of the desired audio frame.
         let required_ts = match to {
             // Frame timestamp given.
@@ -317,8 +326,7 @@ impl FormatReader for AdtsReader<'_> {
                 // seek cannot be completed.
                 if let Some(tb) = self.tracks[0].time_base {
                     tb.calc_timestamp(time)
-                }
-                else {
+                } else {
                     return seek_error(SeekErrorKind::Unseekable);
                 }
             }
@@ -331,15 +339,14 @@ impl FormatReader for AdtsReader<'_> {
         if required_ts < self.next_packet_ts {
             // If the reader is not seekable then only forward seeks are possible.
             if self.reader.is_seekable() {
-                let seeked_pos = self.reader.seek(SeekFrom::Start(self.first_frame_pos))?;
+                let seeked_pos = self.reader.seek(SeekFrom::Start(self.first_frame_pos)).await?;
 
                 // Since the elementary stream has no timestamp information, the position seeked
                 // to must be exactly as requested.
                 if seeked_pos != self.first_frame_pos {
                     return seek_error(SeekErrorKind::Unseekable);
                 }
-            }
-            else {
+            } else {
                 return seek_error(SeekErrorKind::ForwardOnly);
             }
 
@@ -351,7 +358,7 @@ impl FormatReader for AdtsReader<'_> {
         // reached.
         loop {
             // Parse the next frame header.
-            let header = match AdtsHeader::read(&mut self.reader) {
+            let header = match AdtsHeader::read(&mut self.reader).await {
                 Ok(header) => header,
                 Err(Error::IoError(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
                     // ADTS streams have no well-defined end, so if no more frames can be read then
@@ -371,7 +378,7 @@ impl FormatReader for AdtsReader<'_> {
             }
 
             // Otherwise, ignore the frame body.
-            self.reader.ignore_bytes(u64::from(header.payload_len()))?;
+            self.reader.ignore_bytes(u64::from(header.payload_len())).await?;
 
             // Increment the timestamp for the next packet.
             self.next_packet_ts += SAMPLES_PER_AAC_PACKET;
@@ -385,16 +392,9 @@ impl FormatReader for AdtsReader<'_> {
 
         Ok(SeekedTo { track_id: 0, required_ts, actual_ts: self.next_packet_ts })
     }
-
-    fn into_inner<'s>(self: Box<Self>) -> MediaSourceStream<'s>
-    where
-        Self: 's,
-    {
-        self.reader
-    }
 }
 
-fn approximate_frame_count(mut source: &mut MediaSourceStream<'_>) -> Result<Option<u64>> {
+async fn approximate_frame_count(mut source: &mut MediaSourceStream<'_>) -> Result<Option<u64>> {
     let original_pos = source.pos();
     let total_len = match source.byte_len() {
         Some(len) => len - original_pos,
@@ -412,12 +412,11 @@ fn approximate_frame_count(mut source: &mut MediaSourceStream<'_>) -> Result<Opt
         let mut scoped_stream = ScopedStream::new(&mut source, MAX_LEN);
 
         loop {
-            let Ok(header) = AdtsHeader::read(&mut scoped_stream)
-            else {
+            let Ok(header) = AdtsHeader::read(&mut scoped_stream).await else {
                 break;
             };
 
-            if scoped_stream.ignore_bytes(u64::from(header.payload_len())).is_err() {
+            if scoped_stream.ignore_bytes(u64::from(header.payload_len())).await.is_err() {
                 break;
             }
 
@@ -426,8 +425,7 @@ fn approximate_frame_count(mut source: &mut MediaSourceStream<'_>) -> Result<Opt
         }
 
         let _ = source.seek_buffered(original_pos);
-    }
-    else {
+    } else {
         // The number of points to sample within the stream.
         const NUM_SAMPLE_POINTS: u64 = 4;
 
@@ -435,13 +433,13 @@ fn approximate_frame_count(mut source: &mut MediaSourceStream<'_>) -> Result<Opt
 
         // Skip the first sample point (start of file) since it is an outlier.
         for new_pos in (original_pos..total_len - step).step_by(step as usize).skip(1) {
-            let res = source.seek(SeekFrom::Start(new_pos));
+            let res = source.seek(SeekFrom::Start(new_pos)).await;
             if res.is_err() {
                 break;
             }
 
             for _ in 0..=100 {
-                let header = match AdtsHeader::read(&mut source) {
+                let header = match AdtsHeader::read(&mut source).await {
                     Ok(header) => header,
                     _ => break,
                 };
@@ -451,7 +449,7 @@ fn approximate_frame_count(mut source: &mut MediaSourceStream<'_>) -> Result<Opt
             }
         }
 
-        let _ = source.seek(SeekFrom::Start(original_pos))?;
+        let _ = source.seek(SeekFrom::Start(original_pos)).await?;
     }
 
     debug!("adts: parsed {} of {} bytes to approximate duration", n_bytes, total_len);

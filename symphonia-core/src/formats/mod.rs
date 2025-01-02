@@ -8,16 +8,16 @@
 //! The `format` module provides the traits and support structures necessary to implement media
 //! demuxers.
 
-use std::fmt;
-
 use crate::codecs::{audio, subtitle, video, CodecParameters};
 use crate::common::FourCc;
 use crate::errors::Result;
-use crate::io::{BufReader, MediaSourceStream};
+use crate::io::BufReader;
 use crate::meta::{ChapterGroup, Metadata, MetadataLog};
 use crate::units::{Time, TimeBase, TimeStamp};
+use std::fmt;
 
 use bitflags::bitflags;
+use futures_util::FutureExt;
 
 pub mod prelude {
     //! The `formats` module prelude.
@@ -466,11 +466,52 @@ pub trait FormatReader: FormatReaderInfo + Send + Sync {
     /// If `Err(ResetRequired)` is returned, then the track list must be re-examined and all
     /// `Decoder`s re-created. All other errors are unrecoverable.
     fn next_packet(&mut self) -> Result<Option<Packet>>;
+}
 
-    /// Consumes the `FormatReader` and returns the underlying media source stream
-    fn into_inner<'s>(self: Box<Self>) -> MediaSourceStream<'s>
-    where
-        Self: 's;
+pub struct BlockingFormatReader<T>(T);
+
+impl<T: AsyncFormatReader> FormatReaderInfo for BlockingFormatReader<T> {
+    fn format_info(&self) -> &FormatInfo {
+        self.0.format_info()
+    }
+
+    fn metadata(&mut self) -> Metadata<'_> {
+        self.0.metadata()
+    }
+
+    fn attachments(&self) -> &[Attachment] {
+        self.0.attachments()
+    }
+
+    fn chapters(&self) -> Option<&ChapterGroup> {
+        self.0.chapters()
+    }
+
+    fn first_track(&self, track_type: TrackType) -> Option<&Track> {
+        self.0.first_track(track_type)
+    }
+
+    fn first_track_known_codec(&self, track_type: TrackType) -> Option<&Track> {
+        self.0.first_track_known_codec(track_type)
+    }
+
+    fn default_track(&self, track_type: TrackType) -> Option<&Track> {
+        self.0.default_track(track_type)
+    }
+
+    fn tracks(&self) -> &[Track] {
+        self.0.tracks()
+    }
+}
+
+impl<T: AsyncFormatReader + Send + Sync> FormatReader for BlockingFormatReader<T> {
+    fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
+        self.0.seek(mode, to).now_or_never().unwrap()
+    }
+
+    fn next_packet(&mut self) -> Result<Option<Packet>> {
+        self.0.next_packet().now_or_never().unwrap()
+    }
 }
 
 /// Returns true, if `track` is of the specific track type.
@@ -668,8 +709,7 @@ pub mod util {
             // simply append it to the index.
             if ts > last_ts {
                 self.points.push(seek_point)
-            }
-            else if ts < last_ts {
+            } else if ts < last_ts {
                 // If the seek point has a timestamp less-than the last entry in the index, then the
                 // insertion point must be found. This case should rarely occur.
 
@@ -712,8 +752,7 @@ pub mod util {
 
                     if frame_ts < mid_ts {
                         upper = mid;
-                    }
-                    else {
+                    } else {
                         lower = mid;
                     }
                 }
@@ -734,8 +773,7 @@ pub mod util {
             packet.ts = 0;
             packet.dur -= trim;
             trim as u32
-        }
-        else {
+        } else {
             packet.ts -= u64::from(delay);
             0
         };
@@ -745,8 +783,7 @@ pub mod util {
                 let trim = (packet.ts + packet.dur - num_frames).min(packet.dur);
                 packet.dur -= trim;
                 trim as u32
-            }
-            else {
+            } else {
                 0
             };
         }
