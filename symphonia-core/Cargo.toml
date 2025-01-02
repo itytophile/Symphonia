@@ -28,6 +28,7 @@ opt-simd = [
 ]
 
 [dependencies]
+async-trait = "0.1.83"
 bitflags = "2.4.2"
 bytemuck = "1.7"
 futures-util = { version = "0.3", features = ["io"] }

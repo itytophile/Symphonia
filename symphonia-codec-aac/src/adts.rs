@@ -6,9 +6,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use futures_util::future::BoxFuture;
+use futures_util::io::AllowStdIo;
 use futures_util::FutureExt;
 use symphonia_core::errors::{unsupported_error, Error};
-use symphonia_core::support_format;
+use symphonia_core::{async_trait, support_format};
 
 use symphonia_core::audio::Channels;
 use symphonia_core::codecs::audio::well_known::CODEC_ID_AAC;
@@ -17,13 +18,13 @@ use symphonia_core::codecs::CodecParameters;
 use symphonia_core::errors::{decode_error, seek_error, Result, SeekErrorKind};
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::well_known::FORMAT_ID_ADTS;
-use symphonia_core::formats::{prelude::*, AsyncFormatReader, FormatReaderInfo};
+use symphonia_core::formats::{
+    prelude::*, AsyncFormatReader, BlockingFormatReader, FormatReaderInfo,
+};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataLog};
 
-use std::future::Future;
-use std::io::{Seek, SeekFrom};
-use std::pin::Pin;
+use std::io::SeekFrom;
 
 use super::common::{map_to_channels, M4AType, AAC_CHANNELS, AAC_SAMPLE_RATES, M4A_TYPES};
 
@@ -40,7 +41,7 @@ const ADTS_FORMAT_INFO: FormatInfo = FormatInfo {
 /// Audio Data Transport Stream (ADTS) format reader.
 ///
 /// `AdtsReader` implements a demuxer for ADTS (AAC native frames).
-pub struct AdtsReader<'s> {
+pub struct AsyncAdtsReader<'s> {
     reader: MediaSourceStream<'s>,
     tracks: Vec<Track>,
     chapters: Option<ChapterGroup>,
@@ -49,45 +50,60 @@ pub struct AdtsReader<'s> {
     next_packet_ts: u64,
 }
 
-impl<'s> AdtsReader<'s> {
-    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
-        let header = AdtsHeader::read(&mut mss).await?;
+pub type AdtsReader<'s> = BlockingFormatReader<AsyncAdtsReader<'s>>;
 
-        // Rewind back to the start of the frame.
-        mss.seek_buffered_rev(usize::from(header.header_len()));
+pub async fn try_new_async<'s>(
+    mut mss: MediaSourceStream<'s>,
+    opts: FormatOptions,
+) -> Result<AsyncAdtsReader<'s>> {
+    let header = AdtsHeader::read(&mut mss).await?;
 
-        // Use the header to populate the codec parameters.
-        let mut codec_params = AudioCodecParameters::new();
+    // Rewind back to the start of the frame.
+    mss.seek_buffered_rev(usize::from(header.header_len()));
 
-        codec_params.for_codec(CODEC_ID_AAC).with_sample_rate(header.sample_rate);
+    // Use the header to populate the codec parameters.
+    let mut codec_params = AudioCodecParameters::new();
 
-        if let Some(channels) = header.channels {
-            codec_params.with_channels(channels);
-        }
+    codec_params.for_codec(CODEC_ID_AAC).with_sample_rate(header.sample_rate);
 
-        // Populat the track.
-        let mut track = Track::new(0);
-        track.with_codec_params(CodecParameters::Audio(codec_params));
-
-        let first_frame_pos = mss.pos();
-
-        if let Some(n_frames) = approximate_frame_count(&mut mss)? {
-            info!("estimating duration from bitrate, may be inaccurate for vbr files");
-            track.with_num_frames(n_frames);
-        }
-
-        Ok(AdtsReader {
-            reader: mss,
-            tracks: vec![track],
-            chapters: opts.external_data.chapters,
-            metadata: opts.external_data.metadata.unwrap_or_default(),
-            first_frame_pos,
-            next_packet_ts: 0,
-        })
+    if let Some(channels) = header.channels {
+        codec_params.with_channels(channels);
     }
+
+    // Populat the track.
+    let mut track = Track::new(0);
+    track.with_codec_params(CodecParameters::Audio(codec_params));
+
+    let first_frame_pos = mss.pos();
+
+    if let Some(n_frames) = approximate_frame_count(&mut mss).await? {
+        info!("estimating duration from bitrate, may be inaccurate for vbr files");
+        track.with_num_frames(n_frames);
+    }
+
+    Ok(AsyncAdtsReader {
+        reader: mss,
+        tracks: vec![track],
+        chapters: opts.external_data.chapters,
+        metadata: opts.external_data.metadata.unwrap_or_default(),
+        first_frame_pos,
+        next_packet_ts: 0,
+    })
 }
 
-impl Scoreable for AdtsReader<'_> {
+pub fn try_new<'s>(
+    source: impl MediaSource + 's,
+    options: MediaSourceStreamOptions,
+    opts: FormatOptions,
+) -> Result<AdtsReader<'s>> {
+    Ok(BlockingFormatReader::new(
+        try_new_async(MediaSourceStream::new(Box::pin(AllowStdIo::new(source)), options), opts)
+            .now_or_never()
+            .unwrap()?,
+    ))
+}
+
+impl Scoreable for AsyncAdtsReader<'_> {
     fn score<'a>(
         mut src: ScopedStream<&'a mut MediaSourceStream<'_>>,
     ) -> BoxFuture<'a, Result<Score>> {
@@ -247,12 +263,13 @@ impl AdtsHeader {
     }
 }
 
-impl ProbeableFormat<'_> for AdtsReader<'_> {
+impl ProbeableFormat<'_> for AsyncAdtsReader<'_> {
     fn try_probe_new<'s>(
         mss: MediaSourceStream<'s>,
         opts: FormatOptions,
-    ) -> BoxFuture<'s, Result<Box<dyn FormatReader + 's>>> {
-        async move { Ok(Box::new(AdtsReader::try_new(mss, opts).await?) as Box<dyn FormatReader>) }.boxed()
+    ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
+        async move { Ok(Box::new(try_new_async(mss, opts).await?) as Box<dyn AsyncFormatReader>) }
+            .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
@@ -270,7 +287,7 @@ impl ProbeableFormat<'_> for AdtsReader<'_> {
     }
 }
 
-impl FormatReaderInfo for AdtsReader<'_> {
+impl FormatReaderInfo for AsyncAdtsReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &ADTS_FORMAT_INFO
     }
@@ -288,7 +305,8 @@ impl FormatReaderInfo for AdtsReader<'_> {
     }
 }
 
-impl AsyncFormatReader for AdtsReader<'_> {
+#[async_trait]
+impl AsyncFormatReader for AsyncAdtsReader<'_> {
     async fn next_packet(&mut self) -> Result<Option<Packet>> {
         // Parse the header to get the calculated frame size.
         let header = match AdtsHeader::read(&mut self.reader).await {

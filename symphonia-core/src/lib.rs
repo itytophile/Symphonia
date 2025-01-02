@@ -25,3 +25,4 @@ pub mod subtitle;
 pub mod units;
 pub mod util;
 pub mod video;
+pub use async_trait::async_trait;

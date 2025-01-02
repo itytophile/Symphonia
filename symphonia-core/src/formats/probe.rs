@@ -9,15 +9,21 @@
 //! arbitrary media streams.
 
 use std::io::SeekFrom;
+use std::pin::Pin;
 
 use crate::common::Tier;
 use crate::errors::{unsupported_error, Error, Result};
 use crate::formats::{FormatInfo, FormatOptions, FormatReader};
-use crate::io::{MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
+use crate::io::{
+    AsyncMediaSource, MediaSourceStream, MediaSourceStreamOptions, ReadBytes, ScopedStream,
+    SeekBuffered,
+};
 use crate::meta::{MetadataInfo, MetadataOptions, MetadataReader, MetadataSideData};
 
 use futures_util::future::BoxFuture;
 use log::{debug, error, trace, warn};
+
+use super::{AsyncFormatReader, BlockingFormatReader};
 
 mod bloom {
 
@@ -140,7 +146,7 @@ pub struct ProbeMetadataData {
 
 /// `FormatReader` probe factory function. Creates a boxed `FormatReader`.
 pub type FormatFactoryFn =
-    for<'s> fn(MediaSourceStream<'s>, FormatOptions) -> BoxFuture<'s, Result<Box<dyn FormatReader + 's>>>;
+    for<'s> fn(MediaSourceStream<'s>, FormatOptions) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>>;
 
 /// `MetadataReader` probe factory function. Creates a boxed `MetadataReader`.
 pub type MetadataFactoryFn =
@@ -221,19 +227,41 @@ pub trait Scoreable {
     fn score<'a>(src: ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>>;
 }
 
+impl<S: Scoreable> Scoreable for BlockingFormatReader<S> {
+    fn score<'a>(src: ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>> {
+        S::score(src)
+    }
+}
+
 /// To support probing, a `FormatReader` must implement the `ProbeableFormat` trait.
-pub trait ProbeableFormat<'s>: FormatReader + Scoreable {
+pub trait ProbeableFormat<'s>: Scoreable {
     /// Create an instance of the format reader.
     fn try_probe_new(
         mss: MediaSourceStream<'s>,
         opts: FormatOptions,
-    ) -> BoxFuture<'s, Result<Box<dyn FormatReader + 's>>>
+    ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>>
     where
         Self: Sized;
 
     /// Returns a list of probe data that a [`Probe`] will use to determine if the reader
     /// implementing this trait may support the media source stream.
     fn probe_data() -> &'static [ProbeFormatData];
+}
+
+impl<'s, P: ProbeableFormat<'s>> ProbeableFormat<'s> for BlockingFormatReader<P> {
+    fn try_probe_new(
+        mss: MediaSourceStream<'s>,
+        opts: FormatOptions,
+    ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>>
+    where
+        Self: Sized,
+    {
+        P::try_probe_new(mss, opts)
+    }
+
+    fn probe_data() -> &'static [ProbeFormatData] {
+        P::probe_data()
+    }
 }
 
 /// To support probing, a `MetadataReader` must implement the `ProbeableMetadata` trait.
@@ -433,7 +461,7 @@ impl Probe {
         mut mss: MediaSourceStream<'s>,
         mut fmt_opts: FormatOptions,
         meta_opts: MetadataOptions,
-    ) -> Result<Box<dyn FormatReader + 's>> {
+    ) -> Result<Box<dyn AsyncFormatReader + 's>> {
         // Probe for trailing metadata only if the media source stream is seekable, and the length
         // is known.
         if mss.is_seekable() {

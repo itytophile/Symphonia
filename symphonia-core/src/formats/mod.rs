@@ -16,6 +16,7 @@ use crate::meta::{ChapterGroup, Metadata, MetadataLog};
 use crate::units::{Time, TimeBase, TimeStamp};
 use std::fmt;
 
+use async_trait::async_trait;
 use bitflags::bitflags;
 use futures_util::FutureExt;
 
@@ -420,7 +421,7 @@ pub trait FormatReaderInfo {
     }
 }
 
-#[allow(async_fn_in_trait)]
+#[async_trait]
 pub trait AsyncFormatReader: FormatReaderInfo {
     async fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo>;
 
@@ -469,6 +470,12 @@ pub trait FormatReader: FormatReaderInfo + Send + Sync {
 }
 
 pub struct BlockingFormatReader<T>(T);
+
+impl<T> BlockingFormatReader<T> {
+    pub fn new(reader: T) -> Self {
+        Self(reader)
+    }
+}
 
 impl<T: AsyncFormatReader> FormatReaderInfo for BlockingFormatReader<T> {
     fn format_info(&self) -> &FormatInfo {
