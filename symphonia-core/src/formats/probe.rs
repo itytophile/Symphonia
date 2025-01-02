@@ -9,15 +9,11 @@
 //! arbitrary media streams.
 
 use std::io::SeekFrom;
-use std::pin::Pin;
 
 use crate::common::Tier;
 use crate::errors::{unsupported_error, Error, Result};
-use crate::formats::{FormatInfo, FormatOptions, FormatReader};
-use crate::io::{
-    AsyncMediaSource, MediaSourceStream, MediaSourceStreamOptions, ReadBytes, ScopedStream,
-    SeekBuffered,
-};
+use crate::formats::{FormatInfo, FormatOptions};
+use crate::io::{MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
 use crate::meta::{MetadataInfo, MetadataOptions, MetadataReader, MetadataSideData};
 
 use futures_util::future::BoxFuture;

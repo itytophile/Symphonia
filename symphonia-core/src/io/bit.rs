@@ -8,7 +8,6 @@
 use std::cmp::min;
 use std::io;
 
-use crate::io::ReadBytes;
 use crate::util::bits::*;
 
 use super::BufReader;

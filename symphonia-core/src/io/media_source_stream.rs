@@ -467,6 +467,10 @@ impl SeekBuffered for MediaSourceStream<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+
+    use futures_util::{io::AllowStdIo, FutureExt};
+
     use super::{MediaSourceStream, ReadBytes, SeekBuffered};
 
     /// Generate a random vector of bytes of the specified length using a PRNG.
@@ -534,16 +538,25 @@ mod tests {
         })
     }
 
+    struct DumbRead<'s>(MediaSourceStream<'s>);
+
+    impl Read for DumbRead<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.0.read(buf).now_or_never().unwrap()
+        }
+    }
+
     #[test]
     fn verify_mss_read_to_end() {
         let data = generate_random_bytes(5 * 96 * 1024);
 
-        let mut mss = MediaSourceStream::new(
-            Box::pin(futures_util::io::Cursor::new(data.clone())),
+        let mss = MediaSourceStream::new(
+            Box::pin(AllowStdIo::new(std::io::Cursor::new(data.clone()))),
             Default::default(),
         );
+
         let mut output: Vec<u8> = Vec::new();
-        assert_eq!(futures_executor::block_on(mss.read_to_end(&mut output)).unwrap(), data.len());
+        assert_eq!(DumbRead(mss).read_to_end(&mut output).unwrap(), data.len());
         assert_eq!(output.into_boxed_slice(), data);
     }
 
