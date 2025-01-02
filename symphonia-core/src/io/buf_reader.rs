@@ -94,7 +94,7 @@ impl<'a> BufReader<'a> {
 
 impl ReadBytes for BufReader<'_> {
     #[inline(always)]
-    fn read_byte(&mut self) -> io::Result<u8> {
+    async fn read_byte(&mut self) -> io::Result<u8> {
         if self.buf.len() - self.pos < 1 {
             return underrun_error();
         }
@@ -104,7 +104,7 @@ impl ReadBytes for BufReader<'_> {
     }
 
     #[inline(always)]
-    fn read_double_bytes(&mut self) -> io::Result<[u8; 2]> {
+    async fn read_double_bytes(&mut self) -> io::Result<[u8; 2]> {
         if self.buf.len() - self.pos < 2 {
             return underrun_error();
         }
@@ -117,7 +117,7 @@ impl ReadBytes for BufReader<'_> {
     }
 
     #[inline(always)]
-    fn read_triple_bytes(&mut self) -> io::Result<[u8; 3]> {
+    async fn read_triple_bytes(&mut self) -> io::Result<[u8; 3]> {
         if self.buf.len() - self.pos < 3 {
             return underrun_error();
         }
@@ -130,7 +130,7 @@ impl ReadBytes for BufReader<'_> {
     }
 
     #[inline(always)]
-    fn read_quad_bytes(&mut self) -> io::Result<[u8; 4]> {
+    async fn read_quad_bytes(&mut self) -> io::Result<[u8; 4]> {
         if self.buf.len() - self.pos < 4 {
             return underrun_error();
         }
@@ -142,7 +142,7 @@ impl ReadBytes for BufReader<'_> {
         Ok(bytes)
     }
 
-    fn read_buf(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    async fn read_buf(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let len = cmp::min(self.buf.len() - self.pos, buf.len());
         buf[..len].copy_from_slice(&self.buf[self.pos..self.pos + len]);
         self.pos += len;
@@ -150,7 +150,7 @@ impl ReadBytes for BufReader<'_> {
         Ok(len)
     }
 
-    fn read_buf_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+    async fn read_buf_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
         let len = buf.len();
 
         if self.buf.len() - self.pos < len {
@@ -163,7 +163,7 @@ impl ReadBytes for BufReader<'_> {
         Ok(())
     }
 
-    fn scan_bytes_aligned<'b>(
+    async fn scan_bytes_aligned<'b>(
         &mut self,
         pattern: &[u8],
         align: usize,
@@ -175,7 +175,7 @@ impl ReadBytes for BufReader<'_> {
         Ok(&mut buf[..scanned.len()])
     }
 
-    fn ignore_bytes(&mut self, count: u64) -> io::Result<()> {
+    async fn ignore_bytes(&mut self, count: u64) -> io::Result<()> {
         if self.buf.len() - self.pos < count as usize {
             return underrun_error();
         }
