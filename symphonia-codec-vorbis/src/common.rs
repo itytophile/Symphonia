@@ -123,9 +123,7 @@ mod tests {
 
         assert_eq!(bitset.count(), 0);
 
-        for _ in bitset.iter() {
-            panic!("Should be empty!");
-        }
+        assert!(bitset.iter().next().is_none());
 
         bitset.set(1);
         bitset.set(2);

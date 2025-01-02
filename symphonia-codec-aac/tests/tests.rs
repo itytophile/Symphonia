@@ -18,13 +18,8 @@ fn test_decode(data: Vec<u8>) -> symphonia_core::errors::Result<()> {
         &AudioDecoderOptions::default(),
     )?;
 
-    loop {
-        match reader.next_packet()? {
-            Some(packet) => {
-                let _ = decoder.decode(&packet);
-            }
-            None => break,
-        };
+    while let Some(packet) = reader.next_packet()? {
+        let _ = decoder.decode(&packet);
     }
 
     Ok(())
