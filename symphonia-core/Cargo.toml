@@ -30,6 +30,7 @@ opt-simd = [
 [dependencies]
 bitflags = "2.4.2"
 bytemuck = "1.7"
+futures-util = { version = "0.3", features = ["io"] }
 lazy_static = "1.4.0"
 log = "0.4"
 num-complex = "0.4"
@@ -39,3 +40,6 @@ smallvec = "1.13.1"
 version = "6.1.0"
 optional = true
 default-features = false
+
+[dev-dependencies]
+futures-executor = "0.3"
