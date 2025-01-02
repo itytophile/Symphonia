@@ -6,19 +6,18 @@ use symphonia_core::errors;
 use symphonia_core::formats::probe::ProbeableFormat;
 use symphonia_core::io::MediaSourceStream;
 
-fn test_decode(data: Vec<u8>) -> symphonia_core::errors::Result<()> {
-    let data = std::io::Cursor::new(data);
+async fn test_decode(data: Vec<u8>) -> symphonia_core::errors::Result<()> {
+    let mss =
+        MediaSourceStream::new(Box::pin(futures_util::io::Cursor::new(data)), Default::default());
 
-    let mss = MediaSourceStream::new(Box::new(data), Default::default());
-
-    let mut reader = AdtsReader::try_probe_new(mss, Default::default())?;
+    let mut reader = AdtsReader::try_probe_new(mss, Default::default()).await?;
 
     let mut decoder = AacDecoder::try_new(
         AudioCodecParameters::new().for_codec(CODEC_ID_AAC),
         &AudioDecoderOptions::default(),
     )?;
 
-    while let Some(packet) = reader.next_packet()? {
+    while let Some(packet) = reader.next_packet().await? {
         let _ = decoder.decode(&packet);
     }
 
@@ -32,7 +31,7 @@ fn invalid_channels_aac() {
         0xaf,
     ];
 
-    let err = test_decode(file).unwrap_err();
+    let err = futures_executor::block_on(test_decode(file)).unwrap_err();
 
     assert!(matches!(err, errors::Error::Unsupported(_)));
 }

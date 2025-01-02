@@ -52,10 +52,10 @@ pub struct AsyncAdtsReader<'s> {
 
 pub type AdtsReader<'s> = BlockingFormatReader<AsyncAdtsReader<'s>>;
 
-pub async fn try_new_async<'s>(
-    mut mss: MediaSourceStream<'s>,
+pub async fn try_new_async(
+    mut mss: MediaSourceStream<'_>,
     opts: FormatOptions,
-) -> Result<AsyncAdtsReader<'s>> {
+) -> Result<AsyncAdtsReader<'_>> {
     let header = AdtsHeader::read(&mut mss).await?;
 
     // Rewind back to the start of the frame.
@@ -167,29 +167,29 @@ impl AdtsHeader {
         let mut bs = BitReaderLtr::new(&buf);
 
         // Profile.
-        let profile = M4A_TYPES[bs.read_bits_leq32(2).await? as usize + 1];
+        let profile = M4A_TYPES[bs.read_bits_leq32(2)? as usize + 1];
 
         // Sample rate index.
-        let sample_rate = match bs.read_bits_leq32(4).await? as usize {
+        let sample_rate = match bs.read_bits_leq32(4)? as usize {
             15 => return decode_error("adts: forbidden sample rate"),
             13 | 14 => return decode_error("adts: reserved sample rate"),
             idx => AAC_SAMPLE_RATES[idx],
         };
 
         // Private bit.
-        bs.ignore_bit().await?;
+        bs.ignore_bit()?;
 
         // Channel configuration.
-        let channels = match bs.read_bits_leq32(3).await? {
+        let channels = match bs.read_bits_leq32(3)? {
             0 => None,
             idx => map_to_channels(AAC_CHANNELS[idx as usize]),
         };
 
         // Originality, Home, Copyrighted ID bit, Copyright ID start bits. Only used for encoding.
-        bs.ignore_bits(4).await?;
+        bs.ignore_bits(4)?;
 
         // The frame length = sync word + header + payload.
-        let frame_len = bs.read_bits_leq32(13).await? as u16;
+        let frame_len = bs.read_bits_leq32(13)? as u16;
 
         // The frame length must be large enough for the header.
         if frame_len < len {
@@ -197,10 +197,10 @@ impl AdtsHeader {
         }
 
         // Buffer fullness.
-        let _fullness = bs.read_bits_leq32(11).await?;
+        let _fullness = bs.read_bits_leq32(11)?;
 
         // Number of raw data blocks (AAC packets).
-        let raw_data_blocks = bs.read_bits_leq32(2).await? + 1;
+        let raw_data_blocks = bs.read_bits_leq32(2)? + 1;
 
         if raw_data_blocks > 1 {
             // TODO: Support multiple AAC packets per ADTS packet.
@@ -208,7 +208,7 @@ impl AdtsHeader {
         }
 
         // The CRC, if the CRC is provided.
-        let crc = if has_crc { Some(bs.read_bits_leq32(16).await? as u16) } else { None };
+        let crc = if has_crc { Some(bs.read_bits_leq32(16)? as u16) } else { None };
 
         Ok(AdtsHeader { profile, channels, sample_rate, frame_len, crc })
     }

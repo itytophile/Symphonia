@@ -17,7 +17,7 @@
 #![allow(clippy::needless_range_loop)]
 
 mod aac;
-mod adts;
+pub mod adts;
 mod common;
 
 pub use aac::AacDecoder;

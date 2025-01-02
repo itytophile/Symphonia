@@ -716,7 +716,8 @@ pub mod util {
             // simply append it to the index.
             if ts > last_ts {
                 self.points.push(seek_point)
-            } else if ts < last_ts {
+            }
+            else if ts < last_ts {
                 // If the seek point has a timestamp less-than the last entry in the index, then the
                 // insertion point must be found. This case should rarely occur.
 
@@ -759,7 +760,8 @@ pub mod util {
 
                     if frame_ts < mid_ts {
                         upper = mid;
-                    } else {
+                    }
+                    else {
                         lower = mid;
                     }
                 }
@@ -780,7 +782,8 @@ pub mod util {
             packet.ts = 0;
             packet.dur -= trim;
             trim as u32
-        } else {
+        }
+        else {
             packet.ts -= u64::from(delay);
             0
         };
@@ -790,7 +793,8 @@ pub mod util {
                 let trim = (packet.ts + packet.dur - num_frames).min(packet.dur);
                 packet.dur -= trim;
                 trim as u32
-            } else {
+            }
+            else {
                 0
             };
         }

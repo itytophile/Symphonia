@@ -90,17 +90,22 @@ impl<'a> BufReader<'a> {
         self.pos = self.buf.len();
         &self.buf[pos..]
     }
-}
 
-impl ReadBytes for BufReader<'_> {
     #[inline(always)]
-    async fn read_byte(&mut self) -> io::Result<u8> {
+    pub fn read_byte(&mut self) -> io::Result<u8> {
         if self.buf.len() - self.pos < 1 {
             return underrun_error();
         }
 
         self.pos += 1;
         Ok(self.buf[self.pos - 1])
+    }
+}
+
+impl ReadBytes for BufReader<'_> {
+    #[inline(always)]
+    async fn read_byte(&mut self) -> io::Result<u8> {
+        self.read_byte()
     }
 
     #[inline(always)]

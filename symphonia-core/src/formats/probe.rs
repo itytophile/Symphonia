@@ -145,8 +145,10 @@ pub struct ProbeMetadataData {
 }
 
 /// `FormatReader` probe factory function. Creates a boxed `FormatReader`.
-pub type FormatFactoryFn =
-    for<'s> fn(MediaSourceStream<'s>, FormatOptions) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>>;
+pub type FormatFactoryFn = for<'s> fn(
+    MediaSourceStream<'s>,
+    FormatOptions,
+) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>>;
 
 /// `MetadataReader` probe factory function. Creates a boxed `MetadataReader`.
 pub type MetadataFactoryFn =
@@ -173,7 +175,8 @@ enum ProbeMatch {
 }
 
 /// A function pointer to the score function of the registered probeable.
-type ScoreFn = for<'a> fn(ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>>;
+type ScoreFn =
+    for<'a> fn(ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>>;
 
 /// Private/internal generalized representation of a probeable format or metadata reader.
 #[derive(Copy, Clone)]
