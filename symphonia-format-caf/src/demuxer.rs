@@ -10,12 +10,14 @@ use log::{debug, error, info};
 use std::io::{Seek, SeekFrom};
 use symphonia_core::{
     audio::{Channels, Position},
-    codecs::audio::*,
-    codecs::CodecParameters,
+    codecs::{audio::*, CodecParameters},
     errors::{decode_error, seek_error, unsupported_error, Result, SeekErrorKind},
-    formats::prelude::*,
-    formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable},
-    formats::well_known::FORMAT_ID_CAF,
+    formats::{
+        prelude::*,
+        probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable},
+        well_known::FORMAT_ID_CAF,
+        FormatReaderInfo,
+    },
     io::*,
     meta::{Metadata, MetadataLog},
     support_format,
@@ -65,11 +67,25 @@ impl ProbeableFormat<'_> for CafReader<'_> {
     }
 }
 
-impl FormatReader for CafReader<'_> {
+impl FormatReaderInfo for CafReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &CAF_FORMAT_INFO
     }
 
+    fn metadata(&mut self) -> Metadata<'_> {
+        self.metadata.metadata()
+    }
+
+    fn chapters(&self) -> Option<&ChapterGroup> {
+        self.chapters.as_ref()
+    }
+
+    fn tracks(&self) -> &[Track] {
+        &self.tracks
+    }
+}
+
+impl FormatReader for CafReader<'_> {
     fn next_packet(&mut self) -> Result<Option<Packet>> {
         match &mut self.packet_info {
             PacketInfo::Uncompressed { bytes_per_frame } => {
@@ -116,18 +132,6 @@ impl FormatReader for CafReader<'_> {
             }
             PacketInfo::Unknown => decode_error("caf: missing packet info"),
         }
-    }
-
-    fn metadata(&mut self) -> Metadata<'_> {
-        self.metadata.metadata()
-    }
-
-    fn chapters(&self) -> Option<&ChapterGroup> {
-        self.chapters.as_ref()
-    }
-
-    fn tracks(&self) -> &[Track] {
-        &self.tracks
     }
 
     fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {

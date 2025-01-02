@@ -11,9 +11,9 @@ use symphonia_core::codecs::audio::AudioCodecParameters;
 use symphonia_core::codecs::CodecParameters;
 use symphonia_core::errors::{decode_error, seek_error, unsupported_error};
 use symphonia_core::errors::{Result, SeekErrorKind};
-use symphonia_core::formats::prelude::*;
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::well_known::FORMAT_ID_WAVE;
+use symphonia_core::formats::{prelude::*, FormatReaderInfo};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataLog};
 use symphonia_core::support_format;
@@ -195,19 +195,9 @@ impl ProbeableFormat<'_> for WavReader<'_> {
     }
 }
 
-impl FormatReader for WavReader<'_> {
+impl FormatReaderInfo for WavReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &WAVE_FORMAT_INFO
-    }
-
-    fn next_packet(&mut self) -> Result<Option<Packet>> {
-        next_packet(
-            &mut self.reader,
-            &self.packet_info,
-            &self.tracks,
-            self.data_start_pos,
-            self.data_end_pos,
-        )
     }
 
     fn metadata(&mut self) -> Metadata<'_> {
@@ -220,6 +210,18 @@ impl FormatReader for WavReader<'_> {
 
     fn tracks(&self) -> &[Track] {
         &self.tracks
+    }
+}
+
+impl FormatReader for WavReader<'_> {
+    fn next_packet(&mut self) -> Result<Option<Packet>> {
+        next_packet(
+            &mut self.reader,
+            &self.packet_info,
+            &self.tracks,
+            self.data_start_pos,
+            self.data_end_pos,
+        )
     }
 
     fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {

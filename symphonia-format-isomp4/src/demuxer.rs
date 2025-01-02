@@ -10,9 +10,9 @@ use symphonia_core::support_format;
 use symphonia_core::errors::{
     decode_error, seek_error, unsupported_error, Error, Result, SeekErrorKind,
 };
-use symphonia_core::formats::prelude::*;
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::well_known::FORMAT_ID_ISOMP4;
+use symphonia_core::formats::{prelude::*, FormatReaderInfo};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataLog};
 use symphonia_core::units::Time;
@@ -511,11 +511,21 @@ impl ProbeableFormat<'_> for IsoMp4Reader<'_> {
     }
 }
 
-impl FormatReader for IsoMp4Reader<'_> {
+impl FormatReaderInfo for IsoMp4Reader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &ISOMP4_FORMAT_INFO
     }
 
+    fn metadata(&mut self) -> Metadata<'_> {
+        self.metadata.metadata()
+    }
+
+    fn tracks(&self) -> &[Track] {
+        &self.tracks
+    }
+}
+
+impl FormatReader for IsoMp4Reader<'_> {
     fn next_packet(&mut self) -> Result<Option<Packet>> {
         // Get the index of the track with the next-nearest (minimum) timestamp.
         let next_sample_info = loop {
@@ -564,14 +574,6 @@ impl FormatReader for IsoMp4Reader<'_> {
             u64::from(next_sample_info.dur),
             reader.read_boxed_slice_exact(sample_info.len as usize)?,
         )))
-    }
-
-    fn metadata(&mut self) -> Metadata<'_> {
-        self.metadata.metadata()
-    }
-
-    fn tracks(&self) -> &[Track] {
-        &self.tracks
     }
 
     fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {

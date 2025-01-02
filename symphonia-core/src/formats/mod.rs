@@ -348,23 +348,7 @@ pub struct VendorDataAttachment {
     pub data: Box<[u8]>,
 }
 
-/// A `FormatReader` is a container demuxer. It provides methods to probe a media container for
-/// information and access the tracks encapsulated in the container.
-///
-/// Most, if not all, media containers contain metadata, then a number of packetized, and
-/// interleaved codec bitstreams. These bitstreams are usually referred to as tracks. Generally,
-/// the encapsulated bitstreams are independently encoded using some codec. The allowed codecs for a
-/// container are defined in the specification of the container format.
-///
-/// While demuxing, packets are read one-by-one and may be discarded or decoded at the choice of
-/// the caller. The contents of a packet is undefined: it may be a frame of video, a millisecond
-/// of audio, or a subtitle, but a packet will never contain data from two different bitstreams.
-/// Therefore the caller can be selective in what tracks(s) should be decoded and consumed.
-///
-/// `FormatReader` provides an Iterator-like interface over packets for easy consumption and
-/// filtering. Seeking will invalidate the state of any `Decoder` processing packets from the
-/// `FormatReader` and should be reset after a successful seek operation.
-pub trait FormatReader: Send + Sync {
+pub trait FormatReaderInfo {
     /// Get basic information about the container format.
     fn format_info(&self) -> &FormatInfo;
 
@@ -388,20 +372,6 @@ pub trait FormatReader: Send + Sync {
 
     /// Gets the metadata revision log.
     fn metadata(&mut self) -> Metadata<'_>;
-
-    /// Seek, as precisely as possible depending on the mode, to the `Time` or track `TimeStamp`
-    /// requested. Returns the requested and actual `TimeStamps` seeked to, as well as the `Track`.
-    ///
-    /// After a seek, all `Decoder`s consuming packets from this reader should be reset.
-    ///
-    /// Note: The `FormatReader` by itself cannot seek to an exact audio frame, it is only capable
-    /// of seeking to the nearest `Packet`. Therefore, to seek to an exact frame, a `Decoder` must
-    /// decode packets until the requested position is reached. When using the accurate `SeekMode`,
-    /// the seeked position will always be at or before the requested position. If the coarse
-    /// `SeekMode` is used, then the seek position may be after the requested position. Coarse
-    /// seeking is an optional performance enhancement a reader may implement, therefore, a coarse
-    /// seek may sometimes be an accurate seek.
-    fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo>;
 
     /// Gets a list of tracks in the container.
     fn tracks(&self) -> &[Track];
@@ -448,6 +418,45 @@ pub trait FormatReader: Send + Sync {
             .find(|track| matches_track_type(track, track_type))
             .or_else(|| self.first_track_known_codec(track_type))
     }
+}
+
+#[allow(async_fn_in_trait)]
+pub trait AsyncFormatReader: FormatReaderInfo {
+    async fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo>;
+
+    async fn next_packet(&mut self) -> Result<Option<Packet>>;
+}
+
+/// A `FormatReader` is a container demuxer. It provides methods to probe a media container for
+/// information and access the tracks encapsulated in the container.
+///
+/// Most, if not all, media containers contain metadata, then a number of packetized, and
+/// interleaved codec bitstreams. These bitstreams are usually referred to as tracks. Generally,
+/// the encapsulated bitstreams are independently encoded using some codec. The allowed codecs for a
+/// container are defined in the specification of the container format.
+///
+/// While demuxing, packets are read one-by-one and may be discarded or decoded at the choice of
+/// the caller. The contents of a packet is undefined: it may be a frame of video, a millisecond
+/// of audio, or a subtitle, but a packet will never contain data from two different bitstreams.
+/// Therefore the caller can be selective in what tracks(s) should be decoded and consumed.
+///
+/// `FormatReader` provides an Iterator-like interface over packets for easy consumption and
+/// filtering. Seeking will invalidate the state of any `Decoder` processing packets from the
+/// `FormatReader` and should be reset after a successful seek operation.
+pub trait FormatReader: FormatReaderInfo + Send + Sync {
+    /// Seek, as precisely as possible depending on the mode, to the `Time` or track `TimeStamp`
+    /// requested. Returns the requested and actual `TimeStamps` seeked to, as well as the `Track`.
+    ///
+    /// After a seek, all `Decoder`s consuming packets from this reader should be reset.
+    ///
+    /// Note: The `FormatReader` by itself cannot seek to an exact audio frame, it is only capable
+    /// of seeking to the nearest `Packet`. Therefore, to seek to an exact frame, a `Decoder` must
+    /// decode packets until the requested position is reached. When using the accurate `SeekMode`,
+    /// the seeked position will always be at or before the requested position. If the coarse
+    /// `SeekMode` is used, then the seek position may be after the requested position. Coarse
+    /// seeking is an optional performance enhancement a reader may implement, therefore, a coarse
+    /// seek may sometimes be an accurate seek.
+    fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo>;
 
     /// Reader the next packet from the container.
     ///

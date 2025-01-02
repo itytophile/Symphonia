@@ -10,9 +10,9 @@ use std::io::{Seek, SeekFrom};
 
 use symphonia_core::errors::{reset_error, seek_error, unsupported_error};
 use symphonia_core::errors::{Error, Result, SeekErrorKind};
-use symphonia_core::formats::prelude::*;
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::well_known::FORMAT_ID_OGG;
+use symphonia_core::formats::{prelude::*, FormatReaderInfo};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataLog, MetadataSideData};
 use symphonia_core::support_format;
@@ -436,13 +436,9 @@ impl ProbeableFormat<'_> for OggReader<'_> {
     }
 }
 
-impl FormatReader for OggReader<'_> {
+impl FormatReaderInfo for OggReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &OGG_FORMAT_INFO
-    }
-
-    fn next_packet(&mut self) -> Result<Option<Packet>> {
-        self.next_logical_packet()
     }
 
     fn metadata(&mut self) -> Metadata<'_> {
@@ -455,6 +451,12 @@ impl FormatReader for OggReader<'_> {
 
     fn tracks(&self) -> &[Track] {
         &self.tracks
+    }
+}
+
+impl FormatReader for OggReader<'_> {
+    fn next_packet(&mut self) -> Result<Option<Packet>> {
+        self.next_logical_packet()
     }
 
     fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {

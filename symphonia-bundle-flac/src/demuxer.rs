@@ -17,10 +17,10 @@ use symphonia_core::codecs::CodecParameters;
 use symphonia_core::errors::{
     decode_error, seek_error, unsupported_error, Error, Result, SeekErrorKind,
 };
-use symphonia_core::formats::prelude::*;
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::util::{SeekIndex, SeekSearchResult};
 use symphonia_core::formats::well_known::FORMAT_ID_FLAC;
+use symphonia_core::formats::{prelude::*, FormatReaderInfo};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataBuilder, MetadataLog};
 use symphonia_metadata::embedded::flac::*;
@@ -215,17 +215,13 @@ impl ProbeableFormat<'_> for FlacReader<'_> {
     }
 }
 
-impl FormatReader for FlacReader<'_> {
+impl FormatReaderInfo for FlacReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &FLAC_FORMAT_INFO
     }
 
     fn attachments(&self) -> &[Attachment] {
         &self.attachments
-    }
-
-    fn next_packet(&mut self) -> Result<Option<Packet>> {
-        self.parser.parse(&mut self.reader)
     }
 
     fn metadata(&mut self) -> Metadata<'_> {
@@ -238,6 +234,12 @@ impl FormatReader for FlacReader<'_> {
 
     fn tracks(&self) -> &[Track] {
         &self.tracks
+    }
+}
+
+impl FormatReader for FlacReader<'_> {
+    fn next_packet(&mut self) -> Result<Option<Packet>> {
+        self.parser.parse(&mut self.reader)
     }
 
     fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {

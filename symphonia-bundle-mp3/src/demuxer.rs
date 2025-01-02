@@ -12,9 +12,9 @@ use symphonia_core::codecs::audio::well_known::{CODEC_ID_MP1, CODEC_ID_MP2, CODE
 use symphonia_core::codecs::audio::AudioCodecParameters;
 use symphonia_core::codecs::CodecParameters;
 use symphonia_core::errors::{seek_error, Error, Result, SeekErrorKind};
-use symphonia_core::formats::prelude::*;
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::well_known::{FORMAT_ID_MP1, FORMAT_ID_MP2, FORMAT_ID_MP3};
+use symphonia_core::formats::{prelude::*, FormatReaderInfo};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataLog};
 
@@ -135,7 +135,7 @@ impl ProbeableFormat<'_> for MpaReader<'_> {
     }
 }
 
-impl FormatReader for MpaReader<'_> {
+impl FormatReaderInfo for MpaReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         // Safety: MpaReader only supports/has audio tracks.
         match self.tracks[0].codec_params.as_ref().unwrap().audio().unwrap().codec {
@@ -146,6 +146,20 @@ impl FormatReader for MpaReader<'_> {
         }
     }
 
+    fn metadata(&mut self) -> Metadata<'_> {
+        self.metadata.metadata()
+    }
+
+    fn chapters(&self) -> Option<&ChapterGroup> {
+        self.chapters.as_ref()
+    }
+
+    fn tracks(&self) -> &[Track] {
+        &self.tracks
+    }
+}
+
+impl FormatReader for MpaReader<'_> {
     fn next_packet(&mut self) -> Result<Option<Packet>> {
         let (header, packet) = loop {
             // Read the next MPEG frame.
@@ -195,18 +209,6 @@ impl FormatReader for MpaReader<'_> {
         }
 
         Ok(Some(packet))
-    }
-
-    fn metadata(&mut self) -> Metadata<'_> {
-        self.metadata.metadata()
-    }
-
-    fn chapters(&self) -> Option<&ChapterGroup> {
-        self.chapters.as_ref()
-    }
-
-    fn tracks(&self) -> &[Track] {
-        &self.tracks
     }
 
     fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {

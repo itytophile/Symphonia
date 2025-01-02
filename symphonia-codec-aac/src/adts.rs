@@ -13,9 +13,9 @@ use symphonia_core::codecs::audio::well_known::CODEC_ID_AAC;
 use symphonia_core::codecs::audio::AudioCodecParameters;
 use symphonia_core::codecs::CodecParameters;
 use symphonia_core::errors::{decode_error, seek_error, Result, SeekErrorKind};
-use symphonia_core::formats::prelude::*;
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::well_known::FORMAT_ID_ADTS;
+use symphonia_core::formats::{prelude::*, FormatReaderInfo};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataLog};
 
@@ -261,11 +261,25 @@ impl ProbeableFormat<'_> for AdtsReader<'_> {
     }
 }
 
-impl FormatReader for AdtsReader<'_> {
+impl FormatReaderInfo for AdtsReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &ADTS_FORMAT_INFO
     }
 
+    fn metadata(&mut self) -> Metadata<'_> {
+        self.metadata.metadata()
+    }
+
+    fn chapters(&self) -> Option<&ChapterGroup> {
+        self.chapters.as_ref()
+    }
+
+    fn tracks(&self) -> &[Track] {
+        &self.tracks
+    }
+}
+
+impl FormatReader for AdtsReader<'_> {
     fn next_packet(&mut self) -> Result<Option<Packet>> {
         // Parse the header to get the calculated frame size.
         let header = match AdtsHeader::read(&mut self.reader) {
@@ -290,18 +304,6 @@ impl FormatReader for AdtsReader<'_> {
             SAMPLES_PER_AAC_PACKET,
             self.reader.read_boxed_slice_exact(usize::from(header.payload_len()))?,
         )))
-    }
-
-    fn metadata(&mut self) -> Metadata<'_> {
-        self.metadata.metadata()
-    }
-
-    fn chapters(&self) -> Option<&ChapterGroup> {
-        self.chapters.as_ref()
-    }
-
-    fn tracks(&self) -> &[Track] {
-        &self.tracks
     }
 
     fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {

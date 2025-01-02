@@ -9,9 +9,9 @@ use std::collections::{HashMap, VecDeque};
 use std::convert::TryFrom;
 
 use symphonia_core::errors::{seek_error, unsupported_error, Error, Result, SeekErrorKind};
-use symphonia_core::formats::prelude::*;
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::well_known::FORMAT_ID_MKV;
+use symphonia_core::formats::{prelude::*, FormatReaderInfo};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataLog};
 use symphonia_core::support_format;
@@ -468,7 +468,7 @@ impl ProbeableFormat<'_> for MkvReader<'_> {
     }
 }
 
-impl FormatReader for MkvReader<'_> {
+impl FormatReaderInfo for MkvReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &MKV_FORMAT_INFO
     }
@@ -485,6 +485,12 @@ impl FormatReader for MkvReader<'_> {
         self.metadata.metadata()
     }
 
+    fn tracks(&self) -> &[Track] {
+        &self.tracks
+    }
+}
+
+impl FormatReader for MkvReader<'_> {
     fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
         if self.tracks.is_empty() {
             return seek_error(SeekErrorKind::Unseekable);
@@ -509,10 +515,6 @@ impl FormatReader for MkvReader<'_> {
                 }
             }
         }
-    }
-
-    fn tracks(&self) -> &[Track] {
-        &self.tracks
     }
 
     fn next_packet(&mut self) -> Result<Option<Packet>> {
