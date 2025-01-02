@@ -73,58 +73,58 @@ impl<B: ReadBytes, M: Monitor> MonitorStream<B, M> {
 
 impl<B: ReadBytes, M: Monitor> ReadBytes for MonitorStream<B, M> {
     #[inline(always)]
-    fn read_byte(&mut self) -> io::Result<u8> {
-        let byte = self.inner.read_byte()?;
+    async fn read_byte(&mut self) -> io::Result<u8> {
+        let byte = self.inner.read_byte().await?;
         self.monitor.process_byte(byte);
         Ok(byte)
     }
 
     #[inline(always)]
-    fn read_double_bytes(&mut self) -> io::Result<[u8; 2]> {
-        let bytes = self.inner.read_double_bytes()?;
+    async fn read_double_bytes(&mut self) -> io::Result<[u8; 2]> {
+        let bytes = self.inner.read_double_bytes().await?;
         self.monitor.process_double_bytes(bytes);
         Ok(bytes)
     }
 
     #[inline(always)]
-    fn read_triple_bytes(&mut self) -> io::Result<[u8; 3]> {
-        let bytes = self.inner.read_triple_bytes()?;
+    async fn read_triple_bytes(&mut self) -> io::Result<[u8; 3]> {
+        let bytes = self.inner.read_triple_bytes().await?;
         self.monitor.process_triple_bytes(bytes);
         Ok(bytes)
     }
 
     #[inline(always)]
-    fn read_quad_bytes(&mut self) -> io::Result<[u8; 4]> {
-        let bytes = self.inner.read_quad_bytes()?;
+    async fn read_quad_bytes(&mut self) -> io::Result<[u8; 4]> {
+        let bytes = self.inner.read_quad_bytes().await?;
         self.monitor.process_quad_bytes(bytes);
         Ok(bytes)
     }
 
-    fn read_buf(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let len = self.inner.read_buf(buf)?;
+    async fn read_buf(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let len = self.inner.read_buf(buf).await?;
         self.monitor.process_buf_bytes(&buf[0..len]);
         Ok(len)
     }
 
-    fn read_buf_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
-        self.inner.read_buf_exact(buf)?;
+    async fn read_buf_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+        self.inner.read_buf_exact(buf).await?;
         self.monitor.process_buf_bytes(buf);
         Ok(())
     }
 
-    fn scan_bytes_aligned<'a>(
+    async fn scan_bytes_aligned<'a>(
         &mut self,
         pattern: &[u8],
         align: usize,
         buf: &'a mut [u8],
     ) -> io::Result<&'a mut [u8]> {
-        let result = self.inner.scan_bytes_aligned(pattern, align, buf)?;
+        let result = self.inner.scan_bytes_aligned(pattern, align, buf).await?;
         self.monitor.process_buf_bytes(result);
         Ok(result)
     }
 
-    fn ignore_bytes(&mut self, count: u64) -> io::Result<()> {
-        self.inner.ignore_bytes(count)
+    async fn ignore_bytes(&mut self, count: u64) -> io::Result<()> {
+        self.inner.ignore_bytes(count).await
     }
 
     #[inline(always)]

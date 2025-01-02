@@ -524,6 +524,7 @@ pub mod vlc {
 mod private {
     use std::io;
 
+    #[allow(async_fn_in_trait)]
     pub trait FetchBitsLtr {
         /// Discard any remaining bits in the source and fetch new bits.
         async fn fetch_bits(&mut self) -> io::Result<()>;
@@ -541,6 +542,7 @@ mod private {
         fn consume_bits(&mut self, num: u32);
     }
 
+    #[allow(async_fn_in_trait)]
     pub trait FetchBitsRtl {
         /// Discard any remaining bits in the source and fetch new bits.
         async fn fetch_bits(&mut self) -> io::Result<()>;
@@ -566,6 +568,7 @@ pub trait FiniteBitStream {
 }
 
 /// `ReadBitsLtr` reads bits from most-significant to least-significant.
+#[allow(async_fn_in_trait)]
 pub trait ReadBitsLtr: private::FetchBitsLtr {
     /// Discards any saved bits and resets the `BitStream` to prepare it for a byte-aligned read.
     #[inline(always)]
@@ -1016,6 +1019,7 @@ impl FiniteBitStream for BitReaderLtr<'_> {
 }
 
 /// `ReadBitsRtl` reads bits from least-significant to most-significant.
+#[allow(async_fn_in_trait)]
 pub trait ReadBitsRtl: private::FetchBitsRtl {
     /// Discards any saved bits and resets the `BitStream` to prepare it for a byte-aligned read.
     #[inline(always)]

@@ -180,6 +180,7 @@ impl<R: io::Read> io::Seek for ReadOnlySource<R> {
 
 /// `ReadBytes` provides methods to read bytes and interpret them as little- or big-endian
 /// unsigned integers or floating-point values of standard widths.
+#[allow(async_fn_in_trait)]
 pub trait ReadBytes {
     /// Reads a single byte from the stream and returns it or an error.
     async fn read_byte(&mut self) -> io::Result<u8>;

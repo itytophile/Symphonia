@@ -8,12 +8,12 @@
 //! The `probe` module provides methods and traits to support auto-detection of media formats from
 //! arbitrary media streams.
 
-use std::io::{Seek, SeekFrom};
+use std::io::SeekFrom;
 
 use crate::common::Tier;
 use crate::errors::{unsupported_error, Error, Result};
 use crate::formats::{FormatInfo, FormatOptions, FormatReader};
-use crate::io::{MediaSource, MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
+use crate::io::{MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
 use crate::meta::{MetadataInfo, MetadataOptions, MetadataReader, MetadataSideData};
 
 use log::{debug, error, trace, warn};
@@ -426,7 +426,7 @@ impl Probe {
     /// Searches the provided `MediaSourceStream` for a container format. Any metadata that is read
     /// during the search will be queued and attached to the `FormatReader` instance once a
     /// container format is found.
-    pub fn probe<'s>(
+    pub async fn probe<'s>(
         &self,
         hint: &Hint,
         mut mss: MediaSourceStream<'s>,
@@ -441,16 +441,16 @@ impl Probe {
                 // metadata.
                 let init_pos = mss.pos();
 
-                mss = self.probe_trailing(mss, end, &mut fmt_opts, meta_opts)?;
+                mss = self.probe_trailing(mss, end, &mut fmt_opts, meta_opts).await?;
 
                 // Restore position.
-                mss.seek(SeekFrom::Start(init_pos))?;
+                mss.seek(SeekFrom::Start(init_pos)).await?;
             }
         }
 
         // Loop over all elements in the stream until a container format is found.
         loop {
-            match self.next(&mut mss, hint)? {
+            match self.next(&mut mss, hint).await? {
                 // If a container format is found, return an instance to it's reader.
                 ProbeMatch::Format { factory, .. } => {
                     // Instantiate the format reader.
@@ -470,7 +470,7 @@ impl Probe {
 
     /// Scans for trailing metadata relative to the end position of the provided
     /// `MediaSourceStream`.
-    fn probe_trailing<'s>(
+    async fn probe_trailing<'s>(
         &self,
         mut mss: MediaSourceStream<'s>,
         end: u64,
@@ -499,19 +499,19 @@ impl Probe {
             let anchor_pos = end - anchor;
 
             if mss.seek_buffered(anchor_pos) != anchor_pos {
-                mss.seek(SeekFrom::Start(anchor_pos))?;
+                mss.seek(SeekFrom::Start(anchor_pos)).await?;
             }
 
             // There is potentially nothing of interest at this offset. Read a 2-byte window to test
             // with the bloom filter.
-            let win = mss.read_double_bytes()?;
+            let win = mss.read_double_bytes().await?;
 
             if self.filter.may_contain(&win) {
                 // Re-align to the start of the marker.
                 mss.seek_buffered_rel(-2);
 
                 if let Some(ProbeMatch::Metadata { factory, .. }) =
-                    self.find_best_reader(&mut mss, true)?
+                    self.find_best_reader(&mut mss, true).await?
                 {
                     mss = read_and_append_metadata(factory, mss, meta_opts, fmt_opts)?;
 
@@ -526,14 +526,14 @@ impl Probe {
 
     /// Scans the provided `MediaSourceStream` from the current position for the best next metadata
     /// or format reader. If a match is found, returns it.
-    fn next(&self, mss: &mut MediaSourceStream<'_>, _hint: &Hint) -> Result<ProbeMatch> {
+    async fn next(&self, mss: &mut MediaSourceStream<'_>, _hint: &Hint) -> Result<ProbeMatch> {
         let mut win = 0u16;
 
         let init_pos = mss.pos();
         let mut count = 0;
 
         // Scan the stream byte-by-byte. Shifting each byte through a 2-byte window.
-        while let Ok(byte) = mss.read_byte() {
+        while let Ok(byte) = mss.read_byte().await {
             win = (win << 8) | u16::from(byte);
 
             count += 1;
@@ -556,7 +556,7 @@ impl Probe {
                 mss.seek_buffered_rel(-2);
 
                 // Try to find the best matching format or metadata.
-                if let Some(probed) = self.find_best_reader(mss, false)? {
+                if let Some(probed) = self.find_best_reader(mss, false).await? {
                     warn_junk_bytes(mss.pos(), init_pos);
                     return Ok(probed);
                 }
@@ -579,14 +579,14 @@ impl Probe {
     }
 
     /// Find the best reader.
-    fn find_best_reader(
+    async fn find_best_reader(
         &self,
-        mss: &mut MediaSourceStream,
+        mss: &mut MediaSourceStream<'_>,
         is_trailing: bool,
     ) -> Result<Option<ProbeMatch>> {
         // Read upto a 16 byte window starting with the marker.
         let mut win = [0u8; 16];
-        let win_len = mss.read_buf(&mut win)?;
+        let win_len = mss.read_buf(&mut win).await?;
 
         // Re-align the stream to the start of the marker for scoring.
         mss.seek_buffered_rel(-(win_len as isize));

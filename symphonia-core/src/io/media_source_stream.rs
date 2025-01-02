@@ -206,7 +206,7 @@ impl<'s> MediaSourceStream<'s> {
         Ok(read_len - buf.len())
     }
 
-    async fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+    pub async fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         // The current position of the underlying reader is ahead of the current position of the
         // MediaSourceStream by how ever many bytes have not been read from the read-ahead buffer
         // yet. When seeking from the current position adjust the position delta to offset that
@@ -223,6 +223,14 @@ impl<'s> MediaSourceStream<'s> {
         self.reset(pos);
 
         Ok(pos)
+    }
+
+    pub fn is_seekable(&self) -> bool {
+        self.inner.is_seekable()
+    }
+
+    pub fn byte_len(&self) -> Option<u64> {
+        self.inner.byte_len()
     }
 }
 
