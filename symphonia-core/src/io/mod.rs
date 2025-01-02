@@ -33,7 +33,7 @@ pub use buf_reader::BufReader;
 use futures_util::io::AllowStdIo;
 use futures_util::AsyncRead;
 use futures_util::AsyncSeek;
-pub use media_source_stream::MediaSourceStreamOptions;
+pub use media_source_stream::{MediaSourceStream, MediaSourceStreamOptions};
 pub use monitor_stream::{Monitor, MonitorStream};
 pub use scoped_stream::ScopedStream;
 
@@ -110,7 +110,9 @@ impl<T: std::convert::AsRef<[u8]> + Send + Sync> MediaSource for io::Cursor<T> {
     }
 }
 
-impl<T: std::convert::AsRef<[u8]> + Send + Sync + Unpin> AsyncMediaSource for futures_util::io::Cursor<T> {
+impl<T: std::convert::AsRef<[u8]> + Send + Sync + Unpin> AsyncMediaSource
+    for futures_util::io::Cursor<T>
+{
     /// Always returns true since a `io::Cursor<u8>` is always seekable.
     fn is_seekable(&self) -> bool {
         true
