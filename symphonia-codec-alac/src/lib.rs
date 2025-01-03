@@ -29,7 +29,7 @@ use symphonia_core::codecs::registry::{RegisterableAudioDecoder, SupportedAudioC
 use symphonia_core::codecs::CodecInfo;
 use symphonia_core::errors::{decode_error, unsupported_error, Result};
 use symphonia_core::formats::Packet;
-use symphonia_core::io::{BitReaderLtr, BufReader, FiniteStream, ReadBitsLtr, ReadBytes};
+use symphonia_core::io::{BitReaderLtr, BufReader, FiniteStream, ReadBitsLtr};
 use symphonia_core::support_audio_codec;
 
 /// Supported ALAC version.
@@ -87,7 +87,7 @@ struct MagicCookie {
 }
 
 impl MagicCookie {
-    fn try_read<B: ReadBytes + FiniteStream>(reader: &mut B) -> Result<MagicCookie> {
+    fn try_read(reader: &mut BufReader<'_>) -> Result<MagicCookie> {
         // The magic cookie is either 24 or 48 bytes long.
         if reader.byte_len() != 24 && reader.byte_len() != 48 {
             return unsupported_error("alac: invalid magic cookie size");
