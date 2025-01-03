@@ -14,7 +14,7 @@ use std::str;
 use std::sync::Arc;
 
 use symphonia_core::errors::{decode_error, unsupported_error, Result};
-use symphonia_core::io::{BufReader, FiniteStream, ReadBytes};
+use symphonia_core::io::{BufReader, FiniteStream};
 use symphonia_core::meta::RawTag;
 use symphonia_core::meta::RawTagSubField;
 use symphonia_core::meta::{Chapter, RawValue, StandardTag, Tag, Visual};
@@ -410,9 +410,9 @@ pub fn read_chap_frame(mut reader: BufReader<'_>, frame: &FrameInfo<'_>) -> Resu
 
     while reader.bytes_available() >= min_frame_size(frame.major_version) {
         let frame = match frame.major_version {
-            2 => read_id3v2p2_frame(&mut reader),
-            3 => read_id3v2p3_frame(&mut reader),
-            4 => read_id3v2p4_frame(&mut reader),
+            2 => read_id3v2p2_frame(&mut reader).await,
+            3 => read_id3v2p3_frame(&mut reader).await,
+            4 => read_id3v2p4_frame(&mut reader).await,
             _ => break,
         }?;
 
@@ -543,7 +543,7 @@ pub fn read_crm_frame(mut reader: BufReader<'_>, frame: &FrameInfo<'_>) -> Resul
 }
 
 /// Reads a `CTOC` (table of contents) frame.
-pub fn read_ctoc_frame(mut reader: BufReader<'_>, frame: &FrameInfo<'_>) -> Result<FrameResult> {
+pub async fn read_ctoc_frame(mut reader: BufReader<'_>, frame: &FrameInfo<'_>) -> Result<FrameResult> {
     use crate::id3v2::frames::{
         min_frame_size, read_id3v2p2_frame, read_id3v2p3_frame, read_id3v2p4_frame,
     };
@@ -573,9 +573,9 @@ pub fn read_ctoc_frame(mut reader: BufReader<'_>, frame: &FrameInfo<'_>) -> Resu
 
     while reader.bytes_available() >= min_frame_size(frame.major_version) {
         let frame = match frame.major_version {
-            2 => read_id3v2p2_frame(&mut reader),
-            3 => read_id3v2p3_frame(&mut reader),
-            4 => read_id3v2p4_frame(&mut reader),
+            2 => read_id3v2p2_frame(&mut reader).await,
+            3 => read_id3v2p3_frame(&mut reader).await,
+            4 => read_id3v2p4_frame(&mut reader).await,
             _ => break,
         }?;
 

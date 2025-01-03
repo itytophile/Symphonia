@@ -10,7 +10,7 @@
 use std::num::NonZeroU8;
 
 use symphonia_core::errors::{decode_error, unsupported_error, Result};
-use symphonia_core::io::{BufReader, ReadBytes};
+use symphonia_core::io::BufReader;
 use symphonia_core::meta::{ColorMode, ColorModel, ColorPaletteInfo, Size};
 
 use log::debug;

@@ -447,8 +447,8 @@ fn find_legacy_frame_reader(id: [u8; 3]) -> (FrameReader, Option<RawTagParser>) 
 }
 
 /// Read an ID3v2.2 frame.
-pub fn read_id3v2p2_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
-    let id = reader.read_triple_bytes()?;
+pub async fn read_id3v2p2_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
+    let id = reader.read_triple_bytes().await?;
 
     // Check if the frame id contains valid characters. If it does not, then assume the rest of the
     // tag is padding. As per the specification, padding should be all 0s, but there are some tags
@@ -463,7 +463,7 @@ pub fn read_id3v2p2_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
         return Ok(FrameResult::Padding);
     }
 
-    let size = u64::from(reader.read_be_u24()?);
+    let size = u64::from(reader.read_be_u24().await?);
 
     // Find a reader for the frame.
     let (read_frame, raw_tag_parser) = find_legacy_frame_reader(id);
@@ -475,7 +475,7 @@ pub fn read_id3v2p2_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
     }
 
     // Read the frame body into a frame buffer.
-    let data = reader.read_boxed_slice_exact(size as usize)?;
+    let data = reader.read_boxed_slice_exact(size as usize).await?;
 
     // Prepare frame information for the frame reader.
     let info = FrameInfo::new(&id, 2, raw_tag_parser);
@@ -492,8 +492,8 @@ pub fn read_id3v2p2_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
 }
 
 /// Read an ID3v2.3 frame.
-pub fn read_id3v2p3_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
-    let id = reader.read_quad_bytes()?;
+pub async fn read_id3v2p3_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
+    let id = reader.read_quad_bytes().await?;
 
     // Check if the frame id contains valid characters. If it does not, then assume the rest of the
     // tag is padding. As per the specification, padding should be all 0s, but there are some tags
@@ -509,10 +509,10 @@ pub fn read_id3v2p3_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
     }
 
     // The size of the frame after encryption, compression, and unsynchronisation.
-    let size = reader.read_be_u32()?;
+    let size = reader.read_be_u32().await?;
 
     // Frame-specific flags.
-    let flags = reader.read_be_u16()?;
+    let flags = reader.read_be_u16().await?;
 
     // Unused flag bits must be cleared.
     if flags & 0x1f1f != 0x0 {
@@ -539,19 +539,19 @@ pub fn read_id3v2p3_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
     let data_size = size - flag_data_size;
 
     // If compression is enabled, read the decompressed size of the frame.
-    let _decompressed_size = if is_compressed { Some(reader.read_be_u32()?) } else { None };
+    let _decompressed_size = if is_compressed { Some(reader.read_be_u32().await?) } else { None };
 
     // If encryption is enabled, read the encryption ID. A sub-field indicating the frame is
     // encrypted, and its encryption ID will be added to the tag.
-    let encryption_id = if is_encrypted { Some(reader.read_byte()?) } else { None };
+    let encryption_id = if is_encrypted { Some(reader.read_byte().await?) } else { None };
 
     // If frame grouping is enabled, read the group ID of the frame. A sub-field indicating the
     // group will be added to the tag.
-    let group_id = if is_grouped { Some(reader.read_byte()?) } else { None };
+    let group_id = if is_grouped { Some(reader.read_byte().await?) } else { None };
 
     // TODO: Implement zlib DEFLATE decompression.
     if is_compressed {
-        reader.ignore_bytes(u64::from(data_size))?;
+        reader.ignore_bytes(u64::from(data_size)).await?;
 
         warn!("'{}' was skipped because compressed frames are not supported", from_ascii(&id));
         return Ok(FrameResult::Skipped);
@@ -564,7 +564,7 @@ pub fn read_id3v2p3_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
     }
 
     // Read the frame body into a frame buffer.
-    let data = reader.read_boxed_slice_exact(data_size as usize)?;
+    let data = reader.read_boxed_slice_exact(data_size as usize).await?;
 
     // Find a reader for the frame. If the frame is encrypted, then the frame is provided as a
     // binary buffer.
@@ -592,8 +592,8 @@ pub fn read_id3v2p3_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameResult> {
 }
 
 /// Read an ID3v2.4 frame.
-pub fn read_id3v2p4_frame<B: ReadBytes + FiniteStream>(reader: &mut B) -> Result<FrameResult> {
-    let id = reader.read_quad_bytes()?;
+pub async fn read_id3v2p4_frame<B: ReadBytes + FiniteStream>(reader: &mut B) -> Result<FrameResult> {
+    let id = reader.read_quad_bytes().await?;
 
     // Check if the frame id contains valid characters. If it does not, then assume the rest of the
     // tag is padding.
@@ -608,10 +608,10 @@ pub fn read_id3v2p4_frame<B: ReadBytes + FiniteStream>(reader: &mut B) -> Result
     }
 
     // The size of the frame after encryption, compression, and unsynchronisation.
-    let size = read_syncsafe_leq32(reader, 28)?;
+    let size = read_syncsafe_leq32(reader, 28).await?;
 
     // Frame-specific flags.
-    let flags = reader.read_be_u16()?;
+    let flags = reader.read_be_u16().await?;
 
     // Unused flag bits must be cleared.
     if flags & 0x8fb0 != 0x0 {
@@ -645,11 +645,11 @@ pub fn read_id3v2p4_frame<B: ReadBytes + FiniteStream>(reader: &mut B) -> Result
 
     // Frame group identifier byte. Used to group a set of frames. The frame group will be added as
     // a sub-field to all produced tags.
-    let group_id = if is_grouped { Some(reader.read_byte()?) } else { None };
+    let group_id = if is_grouped { Some(reader.read_byte().await?) } else { None };
 
     // Frame encryption flag. Encryption is vendor-specific. Therefore, an encrypted frame will only
     // be provided as a binary buffer. A sub-field indicating the frame is encrypted will be added.
-    let encryption_id = if is_encrypted { Some(reader.read_byte()?) } else { None };
+    let encryption_id = if is_encrypted { Some(reader.read_byte().await?) } else { None };
 
     // The data length indicator is optional in the frame header. This field indicates the original
     // size of the frame body before compression, encryption, and/or unsynchronisation. It is
@@ -659,11 +659,11 @@ pub fn read_id3v2p4_frame<B: ReadBytes + FiniteStream>(reader: &mut B) -> Result
     // The indicated size will be added to all produced tags as a sub-field if the frame is
     // encrypted.
     let _indicated_size =
-        if has_indicated_size { Some(read_syncsafe_leq32(reader, 28)?) } else { None };
+        if has_indicated_size { Some(read_syncsafe_leq32(reader, 28).await?) } else { None };
 
     // TODO: Implement zlib DEFLATE decompression.
     if is_compressed {
-        reader.ignore_bytes(u64::from(data_size))?;
+        reader.ignore_bytes(u64::from(data_size)).await?;
 
         warn!("'{}' was skipped because compressed frames are not supported", from_ascii(&id));
         return Ok(FrameResult::Skipped);
@@ -676,7 +676,7 @@ pub fn read_id3v2p4_frame<B: ReadBytes + FiniteStream>(reader: &mut B) -> Result
     }
 
     // Read the frame body into a frame buffer.
-    let mut data = reader.read_boxed_slice_exact(data_size as usize)?;
+    let mut data = reader.read_boxed_slice_exact(data_size as usize).await?;
 
     // Find a reader for the frame. If the frame is encrypted, then the frame is provided as a
     // binary buffer.

@@ -56,6 +56,8 @@ use std::fmt;
 use std::num::NonZeroU8;
 use std::sync::Arc;
 
+use async_trait::async_trait;
+
 use crate::common::FourCc;
 use crate::errors::Result;
 use crate::io::MediaSourceStream;
@@ -798,12 +800,13 @@ pub struct MetadataBuffer {
 }
 
 /// A `MetadataReader` reads and decodes metadata and produces a revision of that decoded metadata.
+#[async_trait]
 pub trait MetadataReader: Send + Sync {
     /// Get basic information about the metadata format.
     fn metadata_info(&self) -> &MetadataInfo;
 
     /// Read all metadata and return it if successful.
-    fn read_all(&mut self) -> Result<MetadataBuffer>;
+    async fn read_all(&mut self) -> Result<MetadataBuffer>;
 
     /// Consumes the `MetadataReader` and returns the underlying media source stream
     fn into_inner<'s>(self: Box<Self>) -> MediaSourceStream<'s>

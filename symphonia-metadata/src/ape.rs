@@ -9,9 +9,11 @@
 
 use core::str;
 use std::collections::HashMap;
-use std::io::{Seek, SeekFrom};
+use std::io::SeekFrom;
 use std::sync::Arc;
 
+use futures_util::future::{self, BoxFuture};
+use futures_util::FutureExt;
 use symphonia_core::errors::{decode_error, unsupported_error, Result};
 use symphonia_core::formats::probe::{
     Anchors, ProbeMetadataData, ProbeableMetadata, Score, Scoreable,
@@ -22,7 +24,7 @@ use symphonia_core::meta::{
     MetadataBuffer, MetadataBuilder, MetadataInfo, MetadataOptions, MetadataReader, RawTag,
     RawValue, StandardTag, StandardVisualKey, Tag, Visual,
 };
-use symphonia_core::support_metadata;
+use symphonia_core::{async_trait, support_metadata};
 
 use lazy_static::lazy_static;
 use symphonia_core::util::text;
@@ -182,16 +184,16 @@ struct ApeHeader {
 
 impl ApeHeader {
     /// Read and verify the APE tag preamble and version.
-    fn read_identity<B: ReadBytes>(reader: &mut B) -> Result<ApeVersion> {
+    async fn read_identity<B: ReadBytes>(reader: &mut B) -> Result<ApeVersion> {
         let mut preamble = [0; 8];
-        reader.read_buf_exact(&mut preamble)?;
+        reader.read_buf_exact(&mut preamble).await?;
 
         if preamble != *b"APETAGEX" {
             return decode_error("ape: invalid preamble");
         }
 
         // Read the version. 1000 for APEv1, 2000 for APEv2, and so on...
-        let version = match reader.read_u32()? {
+        let version = match reader.read_u32().await? {
             1000 => ApeVersion::V1,
             2000 => ApeVersion::V2,
             _ => return unsupported_error("ape: unsupported version"),
@@ -201,14 +203,14 @@ impl ApeHeader {
     }
 
     /// Read an APE tag header.
-    fn read<B: ReadBytes>(reader: &mut B) -> Result<ApeHeader> {
-        let version = ApeHeader::read_identity(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B) -> Result<ApeHeader> {
+        let version = ApeHeader::read_identity(reader).await?;
 
         // The size of the tag excluding any header.
-        let size = reader.read_u32()?;
-        let num_items = reader.read_u32()?;
-        let flags = reader.read_u32()?;
-        let _reserved = reader.read_u64()?;
+        let size = reader.read_u32().await?;
+        let num_items = reader.read_u32().await?;
+        let flags = reader.read_u32().await?;
+        let _reserved = reader.read_u64().await?;
 
         // Interpret the flags and size based on version.
         let (size, has_footer, has_header, is_header) = match version {
@@ -248,31 +250,31 @@ struct ApeItem {
 
 impl ApeItem {
     /// Try to read and return an APE tag item.
-    fn read<B: ReadBytes>(reader: &mut B, header: &ApeHeader) -> Result<ApeItem> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: &ApeHeader) -> Result<ApeItem> {
         // The length of the value in bytes.
-        let len = reader.read_u32()? as usize;
+        let len = reader.read_u32().await? as usize;
 
         // Read flags.
         let flags = match header.version {
             ApeVersion::V1 => {
                 // Ignore item flags for APEv1. The value type is always text.
-                reader.read_u32()?;
+                reader.read_u32().await?;
                 0
             }
-            ApeVersion::V2 => reader.read_u32()?,
+            ApeVersion::V2 => reader.read_u32().await?,
         };
 
         // Read the null-terminated key.
-        let key = read_key(reader)?;
+        let key = read_key(reader).await?;
 
         // Read the value.
         let value = match (flags >> 1) & 0x3 {
             // UTF-8
-            0 => ApeItemValue::String(read_utf8_value(reader, len)?),
+            0 => ApeItemValue::String(read_utf8_value(reader, len).await?),
             // Binary
-            1 => ApeItemValue::Binary(reader.read_boxed_slice_exact(len)?),
+            1 => ApeItemValue::Binary(reader.read_boxed_slice_exact(len).await?),
             // Locator
-            2 => ApeItemValue::Locator(read_utf8_value(reader, len)?),
+            2 => ApeItemValue::Locator(read_utf8_value(reader, len).await?),
             // Reserved
             3 => return decode_error("ape: reserved item value type"),
             _ => unreachable!(),
@@ -289,9 +291,9 @@ pub struct ApeReader<'s> {
 }
 
 impl<'s> ApeReader<'s> {
-    pub fn try_new(mut mss: MediaSourceStream<'s>, _opts: MetadataOptions) -> Result<Self> {
+    pub async fn try_new(mut mss: MediaSourceStream<'s>, _opts: MetadataOptions) -> Result<Self> {
         // Read and verify the APE tag preamble and version.
-        let version = ApeHeader::read_identity(&mut mss)?;
+        let version = ApeHeader::read_identity(&mut mss).await?;
         mss.seek_buffered_rel(-12);
 
         Ok(Self { reader: mss, version })
@@ -299,20 +301,21 @@ impl<'s> ApeReader<'s> {
 }
 
 impl Scoreable for ApeReader<'_> {
-    fn score(_src: ScopedStream<&mut MediaSourceStream<'_>>) -> Result<Score> {
-        Ok(Score::Supported(255))
+    fn score<'a>(_: ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>> {
+        future::ok(Score::Supported(255)).boxed()
     }
 }
 
-impl ProbeableMetadata<'_> for ApeReader<'_> {
+impl<'s> ProbeableMetadata<'s> for ApeReader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'_>,
+        mss: MediaSourceStream<'s>,
         opts: MetadataOptions,
-    ) -> Result<Box<dyn MetadataReader + '_>>
+    ) -> BoxFuture<'s, Result<Box<dyn MetadataReader + 's>>>
     where
         Self: Sized,
     {
-        Ok(Box::new(ApeReader::try_new(mss, opts)?))
+        async move { Ok(Box::new(ApeReader::try_new(mss, opts).await?) as Box<dyn MetadataReader>) }
+            .boxed()
     }
 
     fn probe_data() -> &'static [ProbeMetadataData] {
@@ -345,6 +348,7 @@ impl ProbeableMetadata<'_> for ApeReader<'_> {
     }
 }
 
+#[async_trait]
 impl MetadataReader for ApeReader<'_> {
     fn metadata_info(&self) -> &MetadataInfo {
         match self.version {
@@ -353,22 +357,22 @@ impl MetadataReader for ApeReader<'_> {
         }
     }
 
-    fn read_all(&mut self) -> Result<MetadataBuffer> {
+    async fn read_all(&mut self) -> Result<MetadataBuffer> {
         let mut builder = MetadataBuilder::new();
 
         // Read the tag header. This may actually be the header OR the footer.
-        let header = ApeHeader::read(&mut self.reader)?;
+        let header = ApeHeader::read(&mut self.reader).await?;
 
         // If the header was actually a footer. Seek to the start of the APE tag.
         if !header.is_header {
             // The current position is the first byte after the APE footer. After the seek, the
             // reader will be at the header (if the tag contains one), or the first item.
-            self.reader.seek(SeekFrom::Current(-(i64::from(header.size))))?;
+            self.reader.seek(SeekFrom::Current(-(i64::from(header.size)))).await?;
 
             // If the APE tag contains a header, read it and do some verification checks. All header
             // and footer fields should match other than the `is_header` flag.
             if header.has_header {
-                let real_header = ApeHeader::read(&mut self.reader)?;
+                let real_header = ApeHeader::read(&mut self.reader).await?;
 
                 if header.has_footer != real_header.has_footer
                     || header.has_header != real_header.has_header
@@ -384,7 +388,7 @@ impl MetadataReader for ApeReader<'_> {
 
         // Read APE tag items.
         for _ in 0..header.num_items {
-            let item = ApeItem::read(&mut self.reader, &header)?;
+            let item = ApeItem::read(&mut self.reader, &header).await?;
 
             let key_lower = item.key.to_ascii_lowercase();
 
@@ -430,7 +434,7 @@ impl MetadataReader for ApeReader<'_> {
         }
 
         // Read the footer.
-        let footer = ApeHeader::read(&mut self.reader)?;
+        let footer = ApeHeader::read(&mut self.reader).await?;
 
         // If the initial header was the actual header, then this checks the entire APE tag was
         // read, and the footer matches the header. If the initial header was actually the footer,
@@ -456,12 +460,12 @@ impl MetadataReader for ApeReader<'_> {
     }
 }
 
-fn read_key<B: ReadBytes>(reader: &mut B) -> Result<String> {
+async fn read_key<B: ReadBytes>(reader: &mut B) -> Result<String> {
     // A key is recommended to be between 2-16 characters.
     let mut key = String::with_capacity(16);
 
     loop {
-        let c = char::from(reader.read_u8()?);
+        let c = char::from(reader.read_u8().await?);
 
         // Break at the null-terminator. Do not add it to the string buffer.
         if text::filter::null(&c) {
@@ -479,8 +483,8 @@ fn read_key<B: ReadBytes>(reader: &mut B) -> Result<String> {
     Ok(key)
 }
 
-fn read_utf8_value<B: ReadBytes>(reader: &mut B, len: usize) -> Result<String> {
-    match String::from_utf8(reader.read_boxed_slice_exact(len)?.into_vec()) {
+async fn read_utf8_value<B: ReadBytes>(reader: &mut B, len: usize) -> Result<String> {
+    match String::from_utf8(reader.read_boxed_slice_exact(len).await?.into_vec()) {
         Ok(value) => Ok(value),
         Err(_) => decode_error("ape: item value is valid not utf-8"),
     }

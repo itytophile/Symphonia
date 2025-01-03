@@ -87,10 +87,10 @@ pub fn parse_riff_info_chunk(
 }
 
 /// Read a RIFF ID3 chunk payload.
-pub fn read_riff_id3_chunk<B: ReadBytes>(
+pub async fn read_riff_id3_chunk<B: ReadBytes>(
     reader: &mut B,
     builder: &mut MetadataBuilder,
     side_data: &mut Vec<MetadataSideData>,
 ) -> Result<()> {
-    crate::id3v2::read_id3v2(reader, builder, side_data)
+    crate::id3v2::read_id3v2(reader, builder, side_data).await
 }

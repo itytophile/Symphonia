@@ -9,9 +9,11 @@
 
 use std::collections::HashMap;
 
+use futures_util::future::{self, BoxFuture};
+use futures_util::FutureExt;
 use symphonia_core::errors::{decode_error, unsupported_error, Result};
 use symphonia_core::formats::probe::{ProbeMetadataData, ProbeableMetadata, Score, Scoreable};
-use symphonia_core::io::*;
+use symphonia_core::{async_trait, io::*};
 use symphonia_core::meta::well_known::METADATA_ID_ID3V2;
 use symphonia_core::meta::{
     ChapterGroup, ChapterGroupItem, MetadataBuffer, MetadataBuilder, MetadataInfo, MetadataOptions,
@@ -100,17 +102,17 @@ struct ExtendedHeader {
 }
 
 /// Read the header of an ID3v2 (verions 2.2+) tag.
-fn read_id3v2_header<B: ReadBytes>(reader: &mut B) -> Result<Header> {
-    let marker = reader.read_triple_bytes()?;
+async fn read_id3v2_header<B: ReadBytes>(reader: &mut B) -> Result<Header> {
+    let marker = reader.read_triple_bytes().await?;
 
     if marker != *b"ID3" {
         return unsupported_error("id3v2: not an ID3v2 tag");
     }
 
-    let major_version = reader.read_u8()?;
-    let minor_version = reader.read_u8()?;
-    let flags = reader.read_u8()?;
-    let size = unsync::read_syncsafe_leq32(reader, 28)?;
+    let major_version = reader.read_u8().await?;
+    let minor_version = reader.read_u8().await?;
+    let flags = reader.read_u8().await?;
+    let size = unsync::read_syncsafe_leq32(reader, 28).await?;
 
     let mut header = Header {
         major_version,
@@ -160,10 +162,10 @@ fn read_id3v2_header<B: ReadBytes>(reader: &mut B) -> Result<Header> {
 }
 
 /// Read the extended header of an ID3v2.3 tag.
-fn read_id3v2p3_extended_header<B: ReadBytes>(reader: &mut B) -> Result<ExtendedHeader> {
-    let size = reader.read_be_u32()?;
-    let flags = reader.read_be_u16()?;
-    let padding_size = reader.read_be_u32()?;
+async fn read_id3v2p3_extended_header<B: ReadBytes>(reader: &mut B) -> Result<ExtendedHeader> {
+    let size = reader.read_be_u32().await?;
+    let flags = reader.read_be_u16().await?;
+    let padding_size = reader.read_be_u32().await?;
 
     if !(size == 6 || size == 10) {
         return decode_error("id3v2: invalid extended header size");
@@ -178,21 +180,21 @@ fn read_id3v2p3_extended_header<B: ReadBytes>(reader: &mut B) -> Result<Extended
 
     // CRC32 flag.
     if size == 10 && flags & 0x8000 != 0 {
-        header.crc32 = Some(reader.read_be_u32()?);
+        header.crc32 = Some(reader.read_be_u32().await?);
     }
 
     Ok(header)
 }
 
 /// Read the extended header of an ID3v2.4 tag.
-fn read_id3v2p4_extended_header<B: ReadBytes>(reader: &mut B) -> Result<ExtendedHeader> {
-    let _size = read_syncsafe_leq32(reader, 28)?;
+async fn read_id3v2p4_extended_header<B: ReadBytes>(reader: &mut B) -> Result<ExtendedHeader> {
+    let _size = read_syncsafe_leq32(reader, 28).await?;
 
-    if reader.read_u8()? != 1 {
+    if reader.read_u8().await? != 1 {
         return decode_error("id3v2: extended flags should have a length of 1");
     }
 
-    let flags = reader.read_u8()?;
+    let flags = reader.read_u8().await?;
 
     let mut header = ExtendedHeader {
         padding_size: None,
@@ -203,7 +205,7 @@ fn read_id3v2p4_extended_header<B: ReadBytes>(reader: &mut B) -> Result<Extended
 
     // Tag is an update flag.
     if flags & 0x40 != 0x0 {
-        let len = reader.read_u8()?;
+        let len = reader.read_u8().await?;
         if len != 1 {
             return decode_error("id3v2: is update extended flag has invalid size");
         }
@@ -213,22 +215,22 @@ fn read_id3v2p4_extended_header<B: ReadBytes>(reader: &mut B) -> Result<Extended
 
     // CRC32 flag.
     if flags & 0x20 != 0x0 {
-        let len = reader.read_u8()?;
+        let len = reader.read_u8().await?;
         if len != 5 {
             return decode_error("id3v2: CRC32 extended flag has invalid size");
         }
 
-        header.crc32 = Some(read_syncsafe_leq32(reader, 32)?);
+        header.crc32 = Some(read_syncsafe_leq32(reader, 32).await?);
     }
 
     // Restrictions flag.
     if flags & 0x10 != 0x0 {
-        let len = reader.read_u8()?;
+        let len = reader.read_u8().await?;
         if len != 1 {
             return decode_error("id3v2: restrictions extended flag has invalid size");
         }
 
-        let restrictions = reader.read_u8()?;
+        let restrictions = reader.read_u8().await?;
 
         let tag_size = match (restrictions & 0xc0) >> 6 {
             0 => TagSizeRestriction::Max128Frames1024KiB,
@@ -278,7 +280,7 @@ fn read_id3v2p4_extended_header<B: ReadBytes>(reader: &mut B) -> Result<Extended
     Ok(header)
 }
 
-fn read_id3v2_body<B: ReadBytes + FiniteStream>(
+async fn read_id3v2_body<B: ReadBytes + FiniteStream>(
     reader: &mut B,
     header: &Header,
     metadata: &mut MetadataBuilder,
@@ -287,8 +289,8 @@ fn read_id3v2_body<B: ReadBytes + FiniteStream>(
     // If there is an extended header, read and parse it based on the major version of the tag.
     if header.has_extended_header {
         let extended = match header.major_version {
-            3 => read_id3v2p3_extended_header(reader)?,
-            4 => read_id3v2p4_extended_header(reader)?,
+            3 => read_id3v2p3_extended_header(reader).await?,
+            4 => read_id3v2p4_extended_header(reader).await?,
             _ => unreachable!(),
         };
         trace!("{:#?}", &extended);
@@ -301,9 +303,9 @@ fn read_id3v2_body<B: ReadBytes + FiniteStream>(
     loop {
         // Read frames based on the major version of the tag.
         let frame = match header.major_version {
-            2 => read_id3v2p2_frame(reader),
-            3 => read_id3v2p3_frame(reader),
-            4 => read_id3v2p4_frame(reader),
+            2 => read_id3v2p2_frame(reader).await,
+            3 => read_id3v2p3_frame(reader).await,
+            4 => read_id3v2p4_frame(reader).await,
             _ => break,
         }?;
 
@@ -350,20 +352,20 @@ fn read_id3v2_body<B: ReadBytes + FiniteStream>(
     Ok(())
 }
 
-pub(crate) fn read_id3v2<B: ReadBytes>(
+pub(crate) async fn read_id3v2<B: ReadBytes>(
     reader: &mut B,
     metadata: &mut MetadataBuilder,
     side_data: &mut Vec<MetadataSideData>,
 ) -> Result<()> {
     // Read the (sorta) version agnostic tag header.
-    let header = read_id3v2_header(reader)?;
+    let header = read_id3v2_header(reader).await?;
 
     // If the unsynchronisation flag is set in the header, all tag data must be passed through the
     // unsynchronisation decoder before being read for verions < 4 of ID3v2.
     let mut scoped = if header.unsynchronisation && header.major_version < 4 {
         let mut unsync = UnsyncStream::new(ScopedStream::new(reader, u64::from(header.size)));
 
-        read_id3v2_body(&mut unsync, &header, metadata, side_data)?;
+        read_id3v2_body(&mut unsync, &header, metadata, side_data).await?;
 
         unsync.into_inner()
     }
@@ -372,13 +374,13 @@ pub(crate) fn read_id3v2<B: ReadBytes>(
     else {
         let mut scoped = ScopedStream::new(reader, u64::from(header.size));
 
-        read_id3v2_body(&mut scoped, &header, metadata, side_data)?;
+        read_id3v2_body(&mut scoped, &header, metadata, side_data).await?;
 
         scoped
     };
 
     // Ignore any remaining data in the tag.
-    scoped.ignore()?;
+    scoped.ignore().await?;
 
     Ok(())
 }
@@ -552,20 +554,21 @@ impl<'s> Id3v2Reader<'s> {
 }
 
 impl Scoreable for Id3v2Reader<'_> {
-    fn score(_src: ScopedStream<&mut MediaSourceStream<'_>>) -> Result<Score> {
-        Ok(Score::Supported(255))
+    fn score<'a>(_: ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>> {
+        future::ok(Score::Supported(255)).boxed()
     }
 }
 
-impl ProbeableMetadata<'_> for Id3v2Reader<'_> {
+impl<'s> ProbeableMetadata<'s> for Id3v2Reader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'_>,
+        mss: MediaSourceStream<'s>,
         opts: MetadataOptions,
-    ) -> Result<Box<dyn MetadataReader + '_>>
+    ) -> BoxFuture<'s, Result<Box<dyn MetadataReader + 's>>>
     where
         Self: Sized,
     {
-        Ok(Box::new(Id3v2Reader::try_new(mss, opts)?))
+        async move { Ok(Box::new(Id3v2Reader::try_new(mss, opts)?) as Box<dyn MetadataReader>) }
+            .boxed()
     }
 
     fn probe_data() -> &'static [ProbeMetadataData] {
@@ -573,16 +576,17 @@ impl ProbeableMetadata<'_> for Id3v2Reader<'_> {
     }
 }
 
+#[async_trait]
 impl MetadataReader for Id3v2Reader<'_> {
     fn metadata_info(&self) -> &MetadataInfo {
         &ID3V2_METADATA_INFO
     }
 
-    fn read_all(&mut self) -> Result<MetadataBuffer> {
+    async fn read_all(&mut self) -> Result<MetadataBuffer> {
         let mut builder = MetadataBuilder::new();
         let mut side_data = Vec::new();
 
-        read_id3v2(&mut self.reader, &mut builder, &mut side_data)?;
+        read_id3v2(&mut self.reader, &mut builder, &mut side_data).await?;
 
         Ok(MetadataBuffer { revision: builder.metadata(), side_data })
     }
