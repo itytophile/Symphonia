@@ -6,7 +6,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use symphonia_core::errors::{unsupported_error, Result};
-use symphonia_core::io::ReadBytes;
+use symphonia_core::io::BufReader;
 use symphonia_core::util::clamp::clamp_i16;
 
 use crate::common::{from_i16_shift, u16_to_i32, Nibble};
@@ -49,30 +49,30 @@ struct AdpcmMsBlockStatus {
 }
 
 impl AdpcmMsBlockStatus {
-    async fn read_mono_preamble<B: ReadBytes>(stream: &mut B) -> Result<Self> {
-        let block_predictor = stream.read_byte().await? as usize;
+    fn read_mono_preamble(stream: &mut BufReader<'_>) -> Result<Self> {
+        let block_predictor = stream.read_byte()? as usize;
         check_block_predictor!(block_predictor, 6);
         let status = Self {
             coeff1: MS_ADAPT_COEFFS1[block_predictor],
             coeff2: MS_ADAPT_COEFFS2[block_predictor],
-            delta: u16_to_i32!(stream.read_u16().await?),
-            sample1: u16_to_i32!(stream.read_u16().await?),
-            sample2: u16_to_i32!(stream.read_u16().await?),
+            delta: u16_to_i32!(stream.read_u16()?),
+            sample1: u16_to_i32!(stream.read_u16()?),
+            sample2: u16_to_i32!(stream.read_u16()?),
         };
         Ok(status)
     }
 
-    async fn read_stereo_preamble<B: ReadBytes>(stream: &mut B) -> Result<(Self, Self)> {
-        let left_block_predictor = stream.read_byte().await? as usize;
+    fn read_stereo_preamble(stream: &mut BufReader<'_>) -> Result<(Self, Self)> {
+        let left_block_predictor = stream.read_byte()? as usize;
         check_block_predictor!(left_block_predictor, 6);
-        let right_block_predictor = stream.read_byte().await? as usize;
+        let right_block_predictor = stream.read_byte()? as usize;
         check_block_predictor!(right_block_predictor, 6);
-        let left_delta = u16_to_i32!(stream.read_u16().await?);
-        let right_delta = u16_to_i32!(stream.read_u16().await?);
-        let left_sample1 = u16_to_i32!(stream.read_u16().await?);
-        let right_sample1 = u16_to_i32!(stream.read_u16().await?);
-        let left_sample2 = u16_to_i32!(stream.read_u16().await?);
-        let right_sample2 = u16_to_i32!(stream.read_u16().await?);
+        let left_delta = u16_to_i32!(stream.read_u16()?);
+        let right_delta = u16_to_i32!(stream.read_u16()?);
+        let left_sample1 = u16_to_i32!(stream.read_u16()?);
+        let right_sample1 = u16_to_i32!(stream.read_u16()?);
+        let left_sample2 = u16_to_i32!(stream.read_u16()?);
+        let right_sample2 = u16_to_i32!(stream.read_u16()?);
         Ok((
             Self {
                 coeff1: MS_ADAPT_COEFFS1[left_block_predictor],
@@ -104,35 +104,34 @@ impl AdpcmMsBlockStatus {
     }
 }
 
-pub(crate) async fn decode_mono<B: ReadBytes>(
-    stream: &mut B,
+pub(crate) fn decode_mono(
+    stream: &mut BufReader<'_>,
     buffer: &mut [i32],
     frames_per_block: usize,
 ) -> Result<()> {
-    let mut status = AdpcmMsBlockStatus::read_mono_preamble(stream).await?;
+    let mut status = AdpcmMsBlockStatus::read_mono_preamble(stream)?;
     buffer[0] = from_i16_shift!(status.sample2);
     buffer[1] = from_i16_shift!(status.sample1);
     for byte in 1..(frames_per_block / 2) {
-        let nibbles = stream.read_u8().await?;
+        let nibbles = stream.read_u8()?;
         buffer[byte * 2] = status.expand_nibble(nibbles, Nibble::Upper);
         buffer[byte * 2 + 1] = status.expand_nibble(nibbles, Nibble::Lower);
     }
     Ok(())
 }
 
-pub(crate) async fn decode_stereo<B: ReadBytes>(
-    stream: &mut B,
+pub(crate) fn decode_stereo(
+    stream: &mut BufReader<'_>,
     buffers: [&mut [i32]; 2],
     frames_per_block: usize,
 ) -> Result<()> {
-    let (mut left_status, mut right_status) =
-        AdpcmMsBlockStatus::read_stereo_preamble(stream).await?;
+    let (mut left_status, mut right_status) = AdpcmMsBlockStatus::read_stereo_preamble(stream)?;
     buffers[0][0] = from_i16_shift!(left_status.sample2);
     buffers[0][1] = from_i16_shift!(left_status.sample1);
     buffers[1][0] = from_i16_shift!(right_status.sample2);
     buffers[1][1] = from_i16_shift!(right_status.sample1);
     for frame in 2..frames_per_block {
-        let nibbles = stream.read_u8().await?;
+        let nibbles = stream.read_u8()?;
         buffers[0][frame] = left_status.expand_nibble(nibbles, Nibble::Upper);
         buffers[1][frame] = right_status.expand_nibble(nibbles, Nibble::Lower);
     }

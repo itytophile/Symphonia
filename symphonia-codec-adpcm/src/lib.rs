@@ -26,7 +26,7 @@ use symphonia_core::codecs::audio::{AudioCodecId, AudioCodecParameters, AudioDec
 use symphonia_core::codecs::audio::{AudioDecoder, FinalizeResult};
 use symphonia_core::errors::{unsupported_error, Result};
 use symphonia_core::formats::Packet;
-use symphonia_core::io::ReadBytes;
+use symphonia_core::io::BufReader;
 
 mod codec_ima;
 mod codec_ms;
@@ -42,16 +42,16 @@ enum InnerDecoder {
 }
 
 impl InnerDecoder {
-    fn decode_mono_fn<B: ReadBytes>(&self) -> impl Fn(&mut B, &mut [i32], usize) -> Result<()> {
+    fn decode_mono_fn(&self) -> impl Fn(&mut BufReader<'_>, &mut [i32], usize) -> Result<()> {
         match *self {
             InnerDecoder::AdpcmMs => codec_ms::decode_mono,
             InnerDecoder::AdpcmIma => codec_ima::decode_mono,
         }
     }
 
-    fn decode_stereo_fn<B: ReadBytes>(
+    fn decode_stereo_fn(
         &self,
-    ) -> impl Fn(&mut B, [&mut [i32]; 2], usize) -> Result<()> {
+    ) -> impl Fn(&mut BufReader<'_>, [&mut [i32]; 2], usize) -> Result<()> {
         match *self {
             InnerDecoder::AdpcmMs => codec_ms::decode_stereo,
             InnerDecoder::AdpcmIma => codec_ima::decode_stereo,

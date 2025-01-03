@@ -6,7 +6,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use symphonia_core::errors::{decode_error, Result};
-use symphonia_core::io::ReadBytes;
+use symphonia_core::io::BufReader;
 use symphonia_core::util::clamp::clamp_i16;
 
 use crate::common::{from_i16_shift, u16_to_i32, Nibble};
@@ -37,14 +37,14 @@ struct AdpcmImaBlockStatus {
 }
 
 impl AdpcmImaBlockStatus {
-    async fn read_preamble<B: ReadBytes>(stream: &mut B) -> Result<Self> {
-        let predictor = u16_to_i32!(stream.read_u16().await?);
-        let step_index = stream.read_byte().await? as i32;
+    fn read_preamble(stream: &mut BufReader<'_>) -> Result<Self> {
+        let predictor = u16_to_i32!(stream.read_u16()?);
+        let step_index = stream.read_byte()? as i32;
         if step_index > 88 {
             return decode_error("adpcm (ima): invalid step index");
         }
         //reserved byte
-        let _ = stream.read_byte().await?;
+        let _ = stream.read_byte()?;
         let status = Self { predictor, step_index };
         Ok(status)
     }
@@ -62,39 +62,37 @@ impl AdpcmImaBlockStatus {
     }
 }
 
-pub(crate) async fn decode_mono<B: ReadBytes>(
-    stream: &mut B,
+pub(crate) fn decode_mono(
+    stream: &mut BufReader<'_>,
     buffer: &mut [i32],
     frames_per_block: usize,
 ) -> Result<()> {
     let data_bytes_per_channel = (frames_per_block - 1) / 2;
-    let mut status = AdpcmImaBlockStatus::read_preamble(stream).await?;
+    let mut status = AdpcmImaBlockStatus::read_preamble(stream)?;
     buffer[0] = from_i16_shift!(status.predictor);
     for byte in 0..data_bytes_per_channel {
-        let nibbles = stream.read_u8().await?;
+        let nibbles = stream.read_u8()?;
         buffer[1 + byte * 2] = status.expand_nibble(nibbles, Nibble::Lower);
         buffer[1 + byte * 2 + 1] = status.expand_nibble(nibbles, Nibble::Upper);
     }
     Ok(())
 }
 
-pub(crate) async fn decode_stereo<B: ReadBytes>(
-    stream: &mut B,
+pub(crate) fn decode_stereo(
+    stream: &mut BufReader<'_>,
     buffers: [&mut [i32]; 2],
     frames_per_block: usize,
 ) -> Result<()> {
     let data_bytes_per_channel = frames_per_block - 1;
-    let mut status = [
-        AdpcmImaBlockStatus::read_preamble(stream).await?,
-        AdpcmImaBlockStatus::read_preamble(stream).await?,
-    ];
+    let mut status =
+        [AdpcmImaBlockStatus::read_preamble(stream)?, AdpcmImaBlockStatus::read_preamble(stream)?];
     buffers[0][0] = from_i16_shift!(status[0].predictor);
     buffers[1][0] = from_i16_shift!(status[1].predictor);
     for index in 0..data_bytes_per_channel {
         let channel = (index / 4) & 1;
         let offset = (index / 8) * 8;
         let byte = index % 4;
-        let nibbles = stream.read_u8().await?;
+        let nibbles = stream.read_u8()?;
         buffers[channel][1 + offset + byte * 2] =
             status[channel].expand_nibble(nibbles, Nibble::Lower);
         buffers[channel][1 + offset + byte * 2 + 1] =

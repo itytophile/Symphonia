@@ -328,7 +328,8 @@ impl Mapper for FlacMapper {
                 MetadataBlockType::Picture => {
                     let mut builder = MetadataBuilder::new();
 
-                    builder.add_visual(read_flac_picture_block(&mut reader).now_or_never().unwrap()?);
+                    builder
+                        .add_visual(read_flac_picture_block(&mut reader).now_or_never().unwrap()?);
 
                     let rev = builder.metadata();
 
