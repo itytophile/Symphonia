@@ -385,13 +385,6 @@ impl FormatReader for FlacReader<'_> {
 
         Ok(SeekedTo { track_id: 0, actual_ts: packet.ts, required_ts: ts })
     }
-
-    fn into_inner<'s>(self: Box<Self>) -> MediaSourceStream<'s>
-    where
-        Self: 's,
-    {
-        self.reader
-    }
 }
 
 /// Reads a StreamInfo block and populates the reader with stream information.

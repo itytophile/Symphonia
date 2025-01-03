@@ -7,7 +7,7 @@
 
 use symphonia_core::audio::{AudioBuffer, AudioMut};
 use symphonia_core::errors::Result;
-use symphonia_core::io::{BitReaderLtr, BufReader, ReadBitsLtr, ReadBytes};
+use symphonia_core::io::{BitReaderLtr, BufReader, ReadBitsLtr};
 use symphonia_core::util::bits::sign_extend_leq32_to_i32;
 
 use crate::common::{ChannelMode, FrameHeader, Layer, Mode};

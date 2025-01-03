@@ -5,6 +5,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use futures_util::FutureExt;
 use symphonia_core::audio::{AsGenericAudioBufferRef, Audio, AudioBuffer, GenericAudioBufferRef};
 use symphonia_core::codecs::audio::{
     AudioCodecId, AudioCodecParameters, AudioDecoder, AudioDecoderOptions, FinalizeResult,
@@ -84,7 +85,7 @@ impl MpaDecoder {
     fn decode_inner(&mut self, packet: &Packet) -> Result<()> {
         let mut reader = packet.as_buf_reader();
 
-        let header = header::read_frame_header(&mut reader)?;
+        let header = header::read_frame_header(&mut reader).now_or_never().unwrap()?;
 
         // The packet should be the size stated in the header.
         if header.frame_size != reader.bytes_available() as usize {

@@ -76,7 +76,7 @@ pub fn is_frame_header_word_synced(sync: u32) -> bool {
 
 /// Synchronize the provided reader to the end of the frame header, and return the frame header as
 /// as `u32`.
-pub fn sync_frame<B: ReadBytes>(reader: &mut B) -> Result<u32> {
+pub async fn sync_frame<B: ReadBytes>(reader: &mut B) -> Result<u32> {
     let mut sync = 0u32;
 
     loop {
@@ -84,7 +84,7 @@ pub fn sync_frame<B: ReadBytes>(reader: &mut B) -> Result<u32> {
         // always starts at a byte boundary with 0xffe (11 consecutive 1 bits.) if supporting up to
         // MPEG version 2.5.
         while !is_frame_header_word_synced(sync) {
-            sync = (sync << 8) | u32::from(reader.read_u8()?);
+            sync = (sync << 8) | u32::from(reader.read_u8().await?);
         }
 
         // Random data can look like a sync word. Do a quick check to increase confidence that
@@ -93,7 +93,7 @@ pub fn sync_frame<B: ReadBytes>(reader: &mut B) -> Result<u32> {
             break;
         }
 
-        sync = (sync << 8) | u32::from(reader.read_u8()?);
+        sync = (sync << 8) | u32::from(reader.read_u8().await?);
     }
 
     Ok(sync)
@@ -238,14 +238,14 @@ pub fn parse_frame_header(header: u32) -> Result<FrameHeader> {
 /// the frame header or an error.
 #[inline]
 #[allow(dead_code)]
-pub fn read_frame_header<B: ReadBytes>(reader: &mut B) -> Result<FrameHeader> {
+pub async fn read_frame_header<B: ReadBytes>(reader: &mut B) -> Result<FrameHeader> {
     // Synchronize and parse the frame header.
-    parse_frame_header(sync_frame(reader)?)
+    parse_frame_header(sync_frame(reader).await?)
 }
 
 /// Read a MPEG audio frame header word from the current location in the stream without any frame
 /// synchronization.
 #[inline]
-pub fn read_frame_header_word_no_sync<B: ReadBytes>(reader: &mut B) -> Result<u32> {
-    Ok(reader.read_be_u32()?)
+pub async fn read_frame_header_word_no_sync<B: ReadBytes>(reader: &mut B) -> Result<u32> {
+    Ok(reader.read_be_u32().await?)
 }

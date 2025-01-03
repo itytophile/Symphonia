@@ -9,7 +9,7 @@ use std::fmt;
 
 use symphonia_core::audio::{AudioBuffer, AudioMut};
 use symphonia_core::errors::{decode_error, Error, Result};
-use symphonia_core::io::{BitReaderLtr, BufReader, ReadBitsLtr, ReadBytes};
+use symphonia_core::io::{BitReaderLtr, BufReader, ReadBitsLtr};
 
 mod bitstream;
 mod codebooks;

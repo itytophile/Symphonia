@@ -358,33 +358,33 @@ fn parse_vorbis_comment(buf: &[u8]) -> Result<ParsedComment> {
     }
 }
 
-pub fn read_vorbis_comment<B: ReadBytes>(
+pub async fn read_vorbis_comment<B: ReadBytes>(
     reader: &mut B,
     builder: &mut MetadataBuilder,
     side_data: &mut Vec<MetadataSideData>,
 ) -> Result<()> {
     // Read the vendor string length in bytes.
-    let vendor_len = reader.read_u32()?;
+    let vendor_len = reader.read_u32().await?;
 
     // Ignore the vendor string.
-    reader.ignore_bytes(u64::from(vendor_len))?;
+    reader.ignore_bytes(u64::from(vendor_len)).await?;
 
     // Map of chapter number to a vector of chapter information.
     let mut chapters: BTreeMap<u32, Vec<ChapterInfo>> = Default::default();
 
     // Read the number of comments.
-    let num_comments = reader.read_u32()? as usize;
+    let num_comments = reader.read_u32().await? as usize;
 
     // Read each comment.
     for _ in 0..num_comments {
         // Read the comment string length in bytes.
-        let comment_length = reader.read_u32()?;
+        let comment_length = reader.read_u32().await?;
 
         // TODO: Apply a limit.
 
         // Read the comment string.
         let mut comment_data = vec![0; comment_length as usize];
-        reader.read_buf_exact(&mut comment_data)?;
+        reader.read_buf_exact(&mut comment_data).await?;
 
         // Parse the Vorbis comment and handle the parsed output.
         match parse_vorbis_comment(&comment_data) {

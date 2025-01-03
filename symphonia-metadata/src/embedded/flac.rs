@@ -40,25 +40,25 @@ fn printable_ascii_to_string(bytes: &[u8]) -> Option<String> {
 }
 
 /// Read a comment metadata block.
-pub fn read_flac_comment_block<B: ReadBytes>(
+pub async fn read_flac_comment_block<B: ReadBytes>(
     reader: &mut B,
     builder: &mut MetadataBuilder,
 ) -> Result<()> {
     // Discard side data.
     let mut side_data = Default::default();
-    vorbis::read_vorbis_comment(reader, builder, &mut side_data)
+    vorbis::read_vorbis_comment(reader, builder, &mut side_data).await
 }
 
 /// Read a picture metadata block.
-pub fn read_flac_picture_block<B: ReadBytes>(reader: &mut B) -> Result<Visual> {
-    let type_enc = reader.read_be_u32()?;
+pub async fn read_flac_picture_block<B: ReadBytes>(reader: &mut B) -> Result<Visual> {
+    let type_enc = reader.read_be_u32().await?;
 
     // Read the Media Type length in bytes.
     // TODO: Apply a limit.
-    let media_type_len = reader.read_be_u32()? as usize;
+    let media_type_len = reader.read_be_u32().await? as usize;
 
     // Read the Media Type bytes
-    let media_type_buf = reader.read_boxed_slice_exact(media_type_len)?;
+    let media_type_buf = reader.read_boxed_slice_exact(media_type_len).await?;
 
     // Convert Media Type bytes to an ASCII string. Non-printable ASCII characters are invalid.
     let media_type = match printable_ascii_to_string(&media_type_buf) {
@@ -73,10 +73,10 @@ pub fn read_flac_picture_block<B: ReadBytes>(reader: &mut B) -> Result<Visual> {
 
     // Read the description length in bytes.
     // TODO: Apply a limit.
-    let desc_len = reader.read_be_u32()? as usize;
+    let desc_len = reader.read_be_u32().await? as usize;
 
     // Read the description bytes.
-    let desc_buf = reader.read_boxed_slice_exact(desc_len)?;
+    let desc_buf = reader.read_boxed_slice_exact(desc_len).await?;
 
     // Convert to a UTF-8 string.
     let desc = String::from_utf8_lossy(&desc_buf);
