@@ -27,7 +27,7 @@ use symphonia_core::codecs::CodecInfo;
 use symphonia_core::dsp::mdct::Imdct;
 use symphonia_core::errors::{decode_error, unsupported_error, Result};
 use symphonia_core::formats::Packet;
-use symphonia_core::io::{BitReaderRtl, BufReader, FiniteBitStream, ReadBitsRtl, ReadBytes};
+use symphonia_core::io::{BitReaderRtl, BufReader, FiniteBitStream, ReadBitsRtl};
 use symphonia_core::support_audio_codec;
 
 use symphonia_common::xiph::audio::vorbis::*;
@@ -401,7 +401,7 @@ const VORBIS_BLOCKSIZE_MIN: u8 = 6;
 /// The maximum block size (8192) expressed as a power-of-2 exponent.
 const VORBIS_BLOCKSIZE_MAX: u8 = 13;
 
-fn read_ident_header<B: ReadBytes>(reader: &mut B) -> Result<IdentHeader> {
+fn read_ident_header(reader: &mut BufReader<'_>) -> Result<IdentHeader> {
     // The packet type must be an identification header.
     let packet_type = reader.read_u8()?;
 
