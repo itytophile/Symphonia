@@ -175,7 +175,7 @@ pub mod default {
         //! The `formats` module re-exports all enabled Symphonia format readers.
 
         #[cfg(feature = "flac")]
-        pub use symphonia_bundle_flac::FlacReader;
+        pub use symphonia_bundle_flac::AsyncFlacReader;
         #[cfg(any(feature = "mp1", feature = "mp2", feature = "mp3"))]
         pub use symphonia_bundle_mp3::MpaReader;
         #[cfg(feature = "aac")]
@@ -187,7 +187,7 @@ pub mod default {
         #[cfg(feature = "mkv")]
         pub use symphonia_format_mkv::MkvReader;
         #[cfg(feature = "ogg")]
-        pub use symphonia_format_ogg::OggReader;
+        pub use symphonia_format_ogg::AsyncOggReader;
         #[cfg(feature = "aiff")]
         pub use symphonia_format_riff::AsyncAiffReader;
         #[cfg(feature = "wav")]
@@ -294,7 +294,7 @@ pub mod default {
         probe.register_format::<formats::CafReader<'_>>();
 
         #[cfg(feature = "flac")]
-        probe.register_format::<formats::FlacReader<'_>>();
+        probe.register_format::<formats::AsyncFlacReader<'_>>();
 
         #[cfg(feature = "isomp4")]
         probe.register_format::<formats::AsyncIsoMp4Reader<'_>>();
@@ -309,7 +309,7 @@ pub mod default {
         probe.register_format::<formats::AsyncWavReader<'_>>();
 
         #[cfg(feature = "ogg")]
-        probe.register_format::<formats::OggReader<'_>>();
+        probe.register_format::<formats::AsyncOggReader<'_>>();
 
         #[cfg(feature = "mkv")]
         probe.register_format::<formats::MkvReader<'_>>();

@@ -9,6 +9,7 @@ use std::cmp;
 use std::convert::TryInto;
 use std::num::Wrapping;
 
+use futures_util::FutureExt;
 use symphonia_common::xiph::audio::flac::StreamInfo;
 use symphonia_core::audio::{
     AsGenericAudioBufferRef, AudioBuffer, AudioMut, AudioSpec, GenericAudioBufferRef,
@@ -139,9 +140,9 @@ impl FlacDecoder {
         let mut reader = packet.as_buf_reader();
 
         // Synchronize to a frame and get the synchronization code.
-        let sync = sync_frame(&mut reader)?;
+        let sync = sync_frame(&mut reader).now_or_never().unwrap()?;
 
-        let header = read_frame_header(&mut reader, sync)?;
+        let header = read_frame_header(&mut reader, sync).now_or_never().unwrap()?;
 
         // Use the bits per sample and sample rate as stated in the frame header, falling back to
         // the stream information if provided. If neither are available, return an error.

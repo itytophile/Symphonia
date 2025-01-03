@@ -5,7 +5,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Seek, SeekFrom};
+use std::io::SeekFrom;
 
 use symphonia_core::errors::Result;
 use symphonia_core::io::{MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
@@ -15,7 +15,7 @@ use super::page::*;
 
 use log::debug;
 
-pub fn probe_stream_start(
+pub async fn probe_stream_start(
     reader: &mut MediaSourceStream<'_>,
     pages: &mut PageReader,
     streams: &mut BTreeMap<u32, LogicalStream>,
@@ -56,7 +56,7 @@ pub fn probe_stream_start(
         }
 
         // Read the next page.
-        match pages.try_next_page(&mut scoped_reader) {
+        match pages.try_next_page(&mut scoped_reader).await {
             Ok(_) => (),
             _ => break,
         };
@@ -65,7 +65,7 @@ pub fn probe_stream_start(
     scoped_reader.into_inner().seek_buffered(original_pos);
 }
 
-pub fn probe_stream_end(
+pub async fn probe_stream_end(
     reader: &mut MediaSourceStream<'_>,
     pages: &mut PageReader,
     streams: &mut BTreeMap<u32, LogicalStream>,
@@ -82,15 +82,15 @@ pub fn probe_stream_end(
     // Optimization: Try a linear scan of the last few pages first. This will cover all
     // non-chained physical streams, which is the majority of cases.
     if byte_range_end >= linear_scan_len && byte_range_start <= byte_range_end - linear_scan_len {
-        reader.seek(SeekFrom::Start(byte_range_end - linear_scan_len))?;
+        reader.seek(SeekFrom::Start(byte_range_end - linear_scan_len)).await?;
     }
     else {
-        reader.seek(SeekFrom::Start(byte_range_start))?;
+        reader.seek(SeekFrom::Start(byte_range_start)).await?;
     }
 
-    pages.next_page(reader)?;
+    pages.next_page(reader).await?;
 
-    let result = scan_stream_end(reader, pages, streams, byte_range_end);
+    let result = scan_stream_end(reader, pages, streams, byte_range_end).await;
 
     // If there are no pages belonging to the current physical stream at the end of the media
     // source stream, then one or more physical streams are chained. Use a bisection method to find
@@ -103,9 +103,9 @@ pub fn probe_stream_end(
 
         loop {
             let mid = (end + start) / 2;
-            reader.seek(SeekFrom::Start(mid))?;
+            reader.seek(SeekFrom::Start(mid)).await?;
 
-            match pages.next_page(reader) {
+            match pages.next_page(reader).await {
                 Ok(_) => (),
                 _ => break,
             }
@@ -125,23 +125,23 @@ pub fn probe_stream_end(
         }
 
         // Scan the last few pages of the physical stream.
-        reader.seek(SeekFrom::Start(start))?;
+        reader.seek(SeekFrom::Start(start)).await?;
 
-        pages.next_page(reader)?;
+        pages.next_page(reader).await?;
 
-        scan_stream_end(reader, pages, streams, end)
+        scan_stream_end(reader, pages, streams, end).await
     }
     else {
         result
     };
 
     // Restore the original position
-    reader.seek(SeekFrom::Start(original_pos))?;
+    reader.seek(SeekFrom::Start(original_pos)).await?;
 
     Ok(result)
 }
 
-fn scan_stream_end(
+async fn scan_stream_end(
     reader: &mut MediaSourceStream<'_>,
     pages: &mut PageReader,
     streams: &mut BTreeMap<u32, LogicalStream>,
@@ -174,7 +174,7 @@ fn scan_stream_end(
         upper_pos = Some(scoped_reader.pos());
 
         // Read to the next page.
-        match pages.next_page(&mut scoped_reader) {
+        match pages.next_page(&mut scoped_reader).await {
             Ok(_) => (),
             _ => break,
         }

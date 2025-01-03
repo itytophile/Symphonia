@@ -61,20 +61,20 @@ pub struct FrameHeader {
     pub sample_rate: Option<u32>,
 }
 
-pub fn sync_frame<B: ReadBytes>(reader: &mut B) -> Result<u16> {
+pub async fn sync_frame<B: ReadBytes>(reader: &mut B) -> Result<u16> {
     let mut sync = 0u16;
 
     // Synchronize stream to Frame Header. FLAC specifies a byte-aligned 14 bit sync code of
     // `0b11_1111_1111_1110`. This would be difficult to find on its own. Expand the search to
     // a 16-bit field of `0b1111_1111_1111_10xx` and search a word at a time.
     while (sync & 0xfffc) != 0xfff8 {
-        sync = sync.wrapping_shl(8) | u16::from(reader.read_u8()?);
+        sync = sync.wrapping_shl(8) | u16::from(reader.read_u8().await?);
     }
 
     Ok(sync)
 }
 
-pub fn read_frame_header<B: ReadBytes>(reader: &mut B, sync: u16) -> Result<FrameHeader> {
+pub async fn read_frame_header<B: ReadBytes>(reader: &mut B, sync: u16) -> Result<FrameHeader> {
     // The header is checksummed with a CRC8 hash. Include the sync code in this CRC.
     let mut crc8 = Crc8Ccitt::new(0);
     crc8.process_buf_bytes(&sync.to_be_bytes());
@@ -89,7 +89,7 @@ pub fn read_frame_header<B: ReadBytes>(reader: &mut B, sync: u16) -> Result<Fram
 
     // Read all the standard frame description fields as one 16-bit value and extract the
     // fields.
-    let desc = reader_crc8.read_be_u16()?;
+    let desc = reader_crc8.read_be_u16().await?;
 
     let block_size_enc = u32::from((desc & 0xf000) >> 12);
     let sample_rate_enc = u32::from((desc & 0x0f00) >> 8);
@@ -103,7 +103,7 @@ pub fn read_frame_header<B: ReadBytes>(reader: &mut B, sync: u16) -> Result<Fram
     let block_sequence = match blocking_strategy {
         // Fixed-blocksize stream sequence blocks by a frame number.
         BlockingStrategy::Fixed => {
-            let frame = match utf8_decode_be_u64(&mut reader_crc8)? {
+            let frame = match utf8_decode_be_u64(&mut reader_crc8).await? {
                 Some(frame) => frame,
                 None => return decode_error("flac: frame sequence number is not valid"),
             };
@@ -119,7 +119,7 @@ pub fn read_frame_header<B: ReadBytes>(reader: &mut B, sync: u16) -> Result<Fram
         }
         // Variable-blocksize streams sequence blocks by a sample number.
         BlockingStrategy::Variable => {
-            let sample = match utf8_decode_be_u64(&mut reader_crc8)? {
+            let sample = match utf8_decode_be_u64(&mut reader_crc8).await? {
                 Some(sample) => sample,
                 None => return decode_error("flac: sample sequence number is not valid"),
             };
@@ -138,9 +138,9 @@ pub fn read_frame_header<B: ReadBytes>(reader: &mut B, sync: u16) -> Result<Fram
     let block_num_samples = match block_size_enc {
         0x1 => 192,
         0x2..=0x5 => 576 * (1 << (block_size_enc - 2)),
-        0x6 => u16::from(reader_crc8.read_u8()?) + 1,
+        0x6 => u16::from(reader_crc8.read_u8().await?) + 1,
         0x7 => {
-            let block_size = reader_crc8.read_be_u16()?;
+            let block_size = reader_crc8.read_be_u16().await?;
             if block_size == 0xffff {
                 return decode_error("flac: block size not allowed to be greater than 65535");
             }
@@ -165,9 +165,9 @@ pub fn read_frame_header<B: ReadBytes>(reader: &mut B, sync: u16) -> Result<Fram
         0x9 => Some(44_100),
         0xa => Some(48_000),
         0xb => Some(96_000),
-        0xc => Some(u32::from(reader_crc8.read_u8()?) * 1000),
-        0xd => Some(u32::from(reader_crc8.read_be_u16()?)),
-        0xe => Some(u32::from(reader_crc8.read_be_u16()?) * 10),
+        0xc => Some(u32::from(reader_crc8.read_u8().await?) * 1000),
+        0xd => Some(u32::from(reader_crc8.read_be_u16().await?)),
+        0xe => Some(u32::from(reader_crc8.read_be_u16().await?) * 10),
         _ => {
             return decode_error("flac: sample rate set to reserved value");
         }
@@ -205,7 +205,7 @@ pub fn read_frame_header<B: ReadBytes>(reader: &mut B, sync: u16) -> Result<Fram
     let crc8_computed = reader_crc8.monitor().crc();
 
     // Get expected CRC8 checksum from the header.
-    let crc8_expected = reader_crc8.into_inner().read_u8()?;
+    let crc8_expected = reader_crc8.into_inner().read_u8().await?;
 
     if crc8_expected != crc8_computed && cfg!(not(fuzzing)) {
         return decode_error("flac: computed frame header CRC does not match expected CRC");
@@ -268,9 +268,9 @@ pub fn is_likely_frame_header(buf: &[u8]) -> bool {
 /// Decodes a big-endian unsigned integer encoded via extended UTF8. In this context, extended UTF8
 /// simply means the encoded UTF8 value may be up to 7 bytes for a maximum integer bit width of
 /// 36-bits.
-fn utf8_decode_be_u64<B: ReadBytes>(src: &mut B) -> Result<Option<u64>> {
+async fn utf8_decode_be_u64<B: ReadBytes>(src: &mut B) -> Result<Option<u64>> {
     // Read the first byte of the UTF8 encoded integer.
-    let mut state = u64::from(src.read_u8()?);
+    let mut state = u64::from(src.read_u8().await?);
 
     // UTF8 prefixes 1s followed by a 0 to indicate the total number of bytes within the multi-byte
     // sequence. Using ranges, determine the mask that will overlap the data bits within the first
@@ -300,7 +300,7 @@ fn utf8_decode_be_u64<B: ReadBytes>(src: &mut B) -> Result<Option<u64>> {
         // only 6 bits are useful. Append these six bits to the result by shifting the result left
         // by 6 bit positions, and appending the next subsequent byte with the first two high-order
         // bits masked out.
-        state = (state << 6) | u64::from(src.read_u8()? & 0x3f);
+        state = (state << 6) | u64::from(src.read_u8().await? & 0x3f);
 
         // TODO: Validation? Invalid if the byte is greater than 0x3f.
     }
@@ -320,13 +320,15 @@ mod tests {
             0xac, 0xf0, 0x90, 0x8d, 0x88, 0xff, 0x80, 0xbf, //
         ]);
 
-        assert_eq!(utf8_decode_be_u64(&mut stream).unwrap(), Some(36));
-        assert_eq!(utf8_decode_be_u64(&mut stream).unwrap(), Some(162));
-        assert_eq!(utf8_decode_be_u64(&mut stream).unwrap(), Some(2361));
-        assert_eq!(utf8_decode_be_u64(&mut stream).unwrap(), Some(8364));
-        assert_eq!(utf8_decode_be_u64(&mut stream).unwrap(), Some(66376));
-        assert_eq!(utf8_decode_be_u64(&mut stream).unwrap(), None);
-        assert_eq!(utf8_decode_be_u64(&mut stream).unwrap(), None);
-        assert_eq!(utf8_decode_be_u64(&mut stream).unwrap(), None);
+        futures_executor::block_on(async {
+            assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), Some(36));
+            assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), Some(162));
+            assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), Some(2361));
+            assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), Some(8364));
+            assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), Some(66376));
+            assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), None);
+            assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), None);
+            assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), None);
+        });
     }
 }

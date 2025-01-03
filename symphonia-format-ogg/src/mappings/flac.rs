@@ -9,6 +9,7 @@ use crate::common::SideData;
 
 use super::{MapResult, Mapper, PacketParser};
 
+use futures_util::FutureExt;
 use symphonia_common::xiph::audio::flac::{MetadataBlockHeader, MetadataBlockType, StreamInfo};
 use symphonia_core::checksum::Crc8Ccitt;
 use symphonia_core::codecs::audio::well_known::CODEC_ID_FLAC;
@@ -75,7 +76,7 @@ pub fn detect(serial: u32, buf: &[u8]) -> Result<Option<Box<dyn Mapper>>> {
 
     // Following the previous OGG FLAC identification data is the stream information block as a
     // native FLAC metadata block.
-    let header = MetadataBlockHeader::read(&mut reader)?;
+    let header = MetadataBlockHeader::read(&mut reader).now_or_never().unwrap()?;
 
     if header.block_type != MetadataBlockType::StreamInfo {
         return Ok(None);
@@ -120,9 +121,9 @@ pub fn detect(serial: u32, buf: &[u8]) -> Result<Option<Box<dyn Mapper>>> {
 }
 
 /// Decodes a big-endian unsigned integer encoded via extended UTF8.
-fn utf8_decode_be_u64<B: ReadBytes>(src: &mut B) -> Result<Option<u64>> {
+async fn utf8_decode_be_u64<B: ReadBytes>(src: &mut B) -> Result<Option<u64>> {
     // NOTE: See the symphonia-bundle-flac crate for a detailed description of this function.
-    let mut state = u64::from(src.read_u8()?);
+    let mut state = u64::from(src.read_u8().await?);
 
     let mask: u8 = match state {
         0x00..=0x7f => return Ok(Some(state)),
@@ -138,7 +139,7 @@ fn utf8_decode_be_u64<B: ReadBytes>(src: &mut B) -> Result<Option<u64>> {
     state &= u64::from(mask);
 
     for _ in 2..mask.leading_zeros() {
-        state = (state << 6) | u64::from(src.read_u8()? & 0x3f);
+        state = (state << 6) | u64::from(src.read_u8().await? & 0x3f);
     }
 
     Ok(Some(state))
@@ -156,7 +157,7 @@ fn decode_frame_header(buf: &[u8]) -> Result<FrameHeader> {
     let mut reader_crc8 = MonitorStream::new(BufReader::new(buf), Crc8Ccitt::new(0));
 
     // Read the sync word.
-    let sync = reader_crc8.read_be_u16()?;
+    let sync = reader_crc8.read_be_u16().now_or_never().unwrap()?;
 
     // Within an OGG packet the frame should be synchronized.
     if sync & 0xfffc != 0xfff8 {
@@ -164,7 +165,7 @@ fn decode_frame_header(buf: &[u8]) -> Result<FrameHeader> {
     }
 
     // Read all the standard frame description fields as one 16-bit value and extract the fields.
-    let desc = reader_crc8.read_be_u16()?;
+    let desc = reader_crc8.read_be_u16().now_or_never().unwrap()?;
 
     // Reserved bit field.
     if desc & 0x0001 == 1 {
@@ -176,7 +177,7 @@ fn decode_frame_header(buf: &[u8]) -> Result<FrameHeader> {
 
     let block_sequence = if is_fixed_block_size {
         // Fixed block size stream sequence blocks by a frame number.
-        let frame = match utf8_decode_be_u64(&mut reader_crc8)? {
+        let frame = match utf8_decode_be_u64(&mut reader_crc8).now_or_never().unwrap()? {
             Some(frame) => frame,
             None => return decode_error("ogg (flac): frame sequence number is not valid"),
         };
@@ -190,7 +191,7 @@ fn decode_frame_header(buf: &[u8]) -> Result<FrameHeader> {
     }
     else {
         // Variable block size streams sequence blocks by a sample number.
-        let sample = match utf8_decode_be_u64(&mut reader_crc8)? {
+        let sample = match utf8_decode_be_u64(&mut reader_crc8).now_or_never().unwrap()? {
             Some(sample) => sample,
             None => return decode_error("ogg: sample sequence number is not valid"),
         };
@@ -209,9 +210,9 @@ fn decode_frame_header(buf: &[u8]) -> Result<FrameHeader> {
     let block_size = match block_size_enc {
         0x1 => 192,
         0x2..=0x5 => 576 * (1 << (block_size_enc - 2)),
-        0x6 => u64::from(reader_crc8.read_u8()?) + 1,
+        0x6 => u64::from(reader_crc8.read_u8().now_or_never().unwrap()?) + 1,
         0x7 => {
-            let block_size = reader_crc8.read_be_u16()?;
+            let block_size = reader_crc8.read_be_u16().now_or_never().unwrap()?;
             if block_size == 0xffff {
                 return decode_error("ogg (flac): block size not allowed to be greater than 65535");
             }
@@ -228,13 +229,13 @@ fn decode_frame_header(buf: &[u8]) -> Result<FrameHeader> {
 
     match sample_rate_enc {
         0xc => {
-            reader_crc8.read_u8()?;
+            reader_crc8.read_u8().now_or_never().unwrap()?;
         }
         0xd => {
-            reader_crc8.read_be_u16()?;
+            reader_crc8.read_be_u16().now_or_never().unwrap()?;
         }
         0xe => {
-            reader_crc8.read_be_u16()?;
+            reader_crc8.read_be_u16().now_or_never().unwrap()?;
         }
         _ => (),
     }
@@ -312,13 +313,13 @@ impl Mapper for FlacMapper {
             let mut reader = BufReader::new(packet);
 
             // Packet types in the range 0x01 thru 0x7f, and 0x81 thru 0xfe are metadata blocks.
-            let header = MetadataBlockHeader::read(&mut reader)?;
+            let header = MetadataBlockHeader::read(&mut reader).now_or_never().unwrap()?;
 
             match header.block_type {
                 MetadataBlockType::VorbisComment => {
                     let mut builder = MetadataBuilder::new();
 
-                    read_flac_comment_block(&mut reader, &mut builder)?;
+                    read_flac_comment_block(&mut reader, &mut builder).now_or_never().unwrap()?;
 
                     let rev = builder.metadata();
 
@@ -327,7 +328,7 @@ impl Mapper for FlacMapper {
                 MetadataBlockType::Picture => {
                     let mut builder = MetadataBuilder::new();
 
-                    builder.add_visual(read_flac_picture_block(&mut reader)?);
+                    builder.add_visual(read_flac_picture_block(&mut reader).now_or_never().unwrap()?);
 
                     let rev = builder.metadata();
 

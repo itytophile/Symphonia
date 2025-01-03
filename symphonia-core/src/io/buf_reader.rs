@@ -292,6 +292,14 @@ impl<'a> BufReader<'a> {
         self.read_buf_exact(&mut buf)?;
         Ok(u64::from_be_bytes(buf))
     }
+
+    /// Reads exactly the number of bytes requested, and returns a boxed slice of the data or an
+    /// error.
+    pub fn read_boxed_slice_exact(&mut self, len: usize) -> io::Result<Box<[u8]>> {
+        let mut buf = vec![0u8; len];
+        self.read_buf_exact(&mut buf)?;
+        Ok(buf.into_boxed_slice())
+    }
 }
 
 impl ReadBytes for BufReader<'_> {

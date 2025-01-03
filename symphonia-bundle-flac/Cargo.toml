@@ -16,6 +16,7 @@ rust-version = "1.77"
 log = "0.4"
 symphonia-core = { version = "0.5.4", path = "../symphonia-core" }
 symphonia-common = { version = "0.5.4", path = "../symphonia-common" }
+futures-util = "0.3.31"
 
 [dependencies.symphonia-metadata]
 version = "0.5.4"
@@ -25,3 +26,6 @@ features = ["flac"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
+[dev-dependencies]
+futures-executor = "0.3.31"

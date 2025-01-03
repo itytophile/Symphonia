@@ -5,9 +5,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::io::{Seek, SeekFrom};
+use std::io::SeekFrom;
 
-use symphonia_core::support_format;
+use futures_util::future::{self, BoxFuture};
+use futures_util::FutureExt;
+use symphonia_core::{async_trait, support_format};
 
 use symphonia_common::xiph::audio::flac::{MetadataBlockHeader, MetadataBlockType, StreamInfo};
 use symphonia_core::codecs::audio::{
@@ -20,7 +22,9 @@ use symphonia_core::errors::{
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::util::{SeekIndex, SeekSearchResult};
 use symphonia_core::formats::well_known::FORMAT_ID_FLAC;
-use symphonia_core::formats::{prelude::*, FormatReaderInfo};
+use symphonia_core::formats::{
+    prelude::*, AsyncFormatReader, BlockingFormatReader, FormatReaderInfo,
+};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataBuilder, MetadataLog};
 use symphonia_metadata::embedded::flac::*;
@@ -39,7 +43,7 @@ const FLAC_FORMAT_INFO: FormatInfo = FormatInfo {
 };
 
 /// Free Lossless Audio Codec (FLAC) native frame reader.
-pub struct FlacReader<'s> {
+pub struct AsyncFlacReader<'s> {
     reader: MediaSourceStream<'s>,
     tracks: Vec<Track>,
     attachments: Vec<Attachment>,
@@ -50,10 +54,12 @@ pub struct FlacReader<'s> {
     parser: PacketParser,
 }
 
-impl<'s> FlacReader<'s> {
-    pub fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+pub type FlacReader<'s> = BlockingFormatReader<AsyncFlacReader<'s>>;
+
+impl<'s> AsyncFlacReader<'s> {
+    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         // Read the first 4 bytes of the stream. Ideally this will be the FLAC stream marker.
-        let marker = mss.read_quad_bytes()?;
+        let marker = mss.read_quad_bytes().await?;
 
         if marker != FLAC_STREAM_MARKER {
             return unsupported_error("flac: missing flac stream marker");
@@ -63,7 +69,7 @@ impl<'s> FlacReader<'s> {
         // no technical need for this from the reader's point of view. Additionally, if the
         // reader is fed a stream mid-way there is no StreamInfo block. Therefore, just read
         // all metadata blocks and handle the StreamInfo block as it comes.
-        let flac = FlacReader::init_with_metadata(mss, opts)?;
+        let flac = AsyncFlacReader::init_with_metadata(mss, opts).await?;
 
         // Make sure that there is atleast one StreamInfo block.
         if flac.tracks.is_empty() {
@@ -74,7 +80,7 @@ impl<'s> FlacReader<'s> {
     }
 
     /// Reads all the metadata blocks, returning a fully populated `FlacReader`.
-    fn init_with_metadata(mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+    async fn init_with_metadata(mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         let mut metadata_builder = MetadataBuilder::new();
 
         let mut reader = mss;
@@ -85,7 +91,7 @@ impl<'s> FlacReader<'s> {
         let mut parser = Default::default();
 
         loop {
-            let header = MetadataBlockHeader::read(&mut reader)?;
+            let header = MetadataBlockHeader::read(&mut reader).await?;
 
             // Create a scoped bytestream to error if the metadata block read functions exceed the
             // stated length of the block.
@@ -96,7 +102,7 @@ impl<'s> FlacReader<'s> {
                 MetadataBlockType::StreamInfo => {
                     // Only a single stream information block is allowed.
                     if track.is_none() {
-                        track = Some(read_stream_info_block(&mut block_stream, &mut parser)?);
+                        track = Some(read_stream_info_block(&mut block_stream, &mut parser).await?);
                     }
                     else {
                         return decode_error("flac: found more than one stream info block");
@@ -104,15 +110,16 @@ impl<'s> FlacReader<'s> {
                 }
                 MetadataBlockType::Application => {
                     let vendor_data =
-                        read_flac_application_block(&mut block_stream, header.block_len)?;
+                        read_flac_application_block(&mut block_stream, header.block_len).await?;
                     attachments.push(Attachment::VendorData(vendor_data));
                 }
                 // SeekTable blocks are parsed into a SeekIndex.
                 MetadataBlockType::SeekTable => {
                     // Only a single seek table block is allowed.
                     if index.is_none() {
-                        index =
-                            Some(read_flac_seektable_block(&mut block_stream, header.block_len)?);
+                        index = Some(
+                            read_flac_seektable_block(&mut block_stream, header.block_len).await?,
+                        );
                     }
                     else {
                         return decode_error("flac: found more than one seek table block");
@@ -120,7 +127,7 @@ impl<'s> FlacReader<'s> {
                 }
                 // VorbisComment blocks are parsed into Tags.
                 MetadataBlockType::VorbisComment => {
-                    read_flac_comment_block(&mut block_stream, &mut metadata_builder)?;
+                    read_flac_comment_block(&mut block_stream, &mut metadata_builder).await?;
                 }
                 // Cuesheet blocks are parsed into Cues.
                 MetadataBlockType::Cuesheet => {
@@ -128,7 +135,7 @@ impl<'s> FlacReader<'s> {
                     // timebase is known to calculate the cue times. This should always be the case
                     // since the stream information block must always be the first metadata block.
                     if let Some(tb) = track.as_ref().and_then(|track| track.time_base) {
-                        chapters = Some(read_flac_cuesheet_block(&mut block_stream, tb)?);
+                        chapters = Some(read_flac_cuesheet_block(&mut block_stream, tb).await?);
                     }
                     else {
                         return decode_error("flac: cuesheet block before stream info");
@@ -136,16 +143,16 @@ impl<'s> FlacReader<'s> {
                 }
                 // Picture blocks are read as Visuals.
                 MetadataBlockType::Picture => {
-                    metadata_builder.add_visual(read_flac_picture_block(&mut block_stream)?);
+                    metadata_builder.add_visual(read_flac_picture_block(&mut block_stream).await?);
                 }
                 // Padding blocks are skipped.
                 MetadataBlockType::Padding => {
-                    block_stream.ignore_bytes(u64::from(header.block_len))?;
+                    block_stream.ignore_bytes(u64::from(header.block_len)).await?;
                 }
                 // Unknown block encountered. Skip these blocks as they may be part of a future
                 // version of FLAC, but  print a message.
                 MetadataBlockType::Unknown(id) => {
-                    block_stream.ignore_bytes(u64::from(header.block_len))?;
+                    block_stream.ignore_bytes(u64::from(header.block_len)).await?;
                     info!("ignoring {} bytes of block width id={}.", header.block_len, id);
                 }
             }
@@ -156,7 +163,7 @@ impl<'s> FlacReader<'s> {
 
             if block_unread_len > 0 {
                 info!("under read block by {} bytes.", block_unread_len);
-                block_stream.ignore_bytes(block_unread_len)?;
+                block_stream.ignore_bytes(block_unread_len).await?;
             }
 
             // Exit when the last header is read.
@@ -177,13 +184,13 @@ impl<'s> FlacReader<'s> {
         metadata.push(metadata_builder.metadata());
 
         // Synchronize the packet parser to the first audio frame.
-        let _ = parser.resync(&mut reader)?;
+        let _ = parser.resync(&mut reader).await?;
 
         // The first frame offset is the byte offset from the beginning of the stream after all the
         // metadata blocks have been read.
         let first_frame_offset = reader.pos();
 
-        Ok(FlacReader {
+        Ok(AsyncFlacReader {
             reader,
             tracks,
             attachments,
@@ -196,18 +203,23 @@ impl<'s> FlacReader<'s> {
     }
 }
 
-impl Scoreable for FlacReader<'_> {
-    fn score(_src: ScopedStream<&mut MediaSourceStream<'_>>) -> Result<Score> {
-        Ok(Score::Supported(255))
+impl Scoreable for AsyncFlacReader<'_> {
+    fn score<'s>(
+        _src: ScopedStream<&'s mut MediaSourceStream<'_>>,
+    ) -> BoxFuture<'s, Result<Score>> {
+        future::ok(Score::Supported(255)).boxed()
     }
 }
 
-impl ProbeableFormat<'_> for FlacReader<'_> {
+impl<'s> ProbeableFormat<'s> for AsyncFlacReader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'_>,
+        mss: MediaSourceStream<'s>,
         opts: FormatOptions,
-    ) -> Result<Box<dyn FormatReader + '_>> {
-        Ok(Box::new(FlacReader::try_new(mss, opts)?))
+    ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
+        async move {
+            Ok(Box::new(AsyncFlacReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
+        }
+        .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
@@ -215,7 +227,7 @@ impl ProbeableFormat<'_> for FlacReader<'_> {
     }
 }
 
-impl FormatReaderInfo for FlacReader<'_> {
+impl FormatReaderInfo for AsyncFlacReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &FLAC_FORMAT_INFO
     }
@@ -237,12 +249,13 @@ impl FormatReaderInfo for FlacReader<'_> {
     }
 }
 
-impl FormatReader for FlacReader<'_> {
-    fn next_packet(&mut self) -> Result<Option<Packet>> {
-        self.parser.parse(&mut self.reader)
+#[async_trait]
+impl AsyncFormatReader for AsyncFlacReader<'_> {
+    async fn next_packet(&mut self) -> Result<Option<Packet>> {
+        self.parser.parse(&mut self.reader).await
     }
 
-    fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
+    async fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
         if self.tracks.is_empty() {
             return seek_error(SeekErrorKind::Unseekable);
         }
@@ -284,7 +297,7 @@ impl FormatReader for FlacReader<'_> {
             // lower bound is set to the byte offset of the first frame, while the upper bound is
             // set to the length of the stream.
             let mut start_byte_offset = self.first_frame_offset;
-            let mut end_byte_offset = self.reader.seek(SeekFrom::End(0))?;
+            let mut end_byte_offset = self.reader.seek(SeekFrom::End(0)).await?;
 
             // If there is an index, use it to refine the binary search range.
             if let Some(ref index) = self.index {
@@ -314,9 +327,9 @@ impl FormatReader for FlacReader<'_> {
             // search becomes inefficient when the range is small.
             while end_byte_offset - start_byte_offset > 2 * 8096 {
                 let mid_byte_offset = (start_byte_offset + end_byte_offset) / 2;
-                self.reader.seek(SeekFrom::Start(mid_byte_offset))?;
+                self.reader.seek(SeekFrom::Start(mid_byte_offset)).await?;
 
-                let sync = self.parser.resync(&mut self.reader)?;
+                let sync = self.parser.resync(&mut self.reader).await?;
 
                 if ts < sync.ts {
                     end_byte_offset = mid_byte_offset;
@@ -333,7 +346,7 @@ impl FormatReader for FlacReader<'_> {
 
             // The binary search did not find an exact frame, but the range has been narrowed. Seek
             // to the start of the range, and continue with a linear search.
-            self.reader.seek(SeekFrom::Start(start_byte_offset))?;
+            self.reader.seek(SeekFrom::Start(start_byte_offset)).await?;
         }
 
         // Linearly search the stream packet-by-packet for the packet that contains the desired
@@ -349,7 +362,7 @@ impl FormatReader for FlacReader<'_> {
             // only reason why an UnexpectedEof would occur is if the source has been truncated
             // since the required timestamp was checked to be shorter than the duration earlier. In
             // this case the UnexpectedEof error should be passed-on to the caller.
-            let sync = match self.parser.resync(&mut self.reader) {
+            let sync = match self.parser.resync(&mut self.reader).await {
                 Ok(sync) => sync,
                 Err(Error::IoError(err))
                     if err.kind() == std::io::ErrorKind::UnexpectedEof
@@ -378,7 +391,7 @@ impl FormatReader for FlacReader<'_> {
             }
 
             // Advance the reader such that the next iteration will sync to a different frame.
-            self.reader.read_byte()?;
+            self.reader.read_byte().await?;
         };
 
         debug!("seeked to packet_ts={} (delta={})", packet.ts, packet.ts as i64 - ts as i64);
@@ -388,7 +401,7 @@ impl FormatReader for FlacReader<'_> {
 }
 
 /// Reads a StreamInfo block and populates the reader with stream information.
-fn read_stream_info_block<B: ReadBytes + FiniteStream>(
+async fn read_stream_info_block<B: ReadBytes + FiniteStream>(
     reader: &mut B,
     parser: &mut PacketParser,
 ) -> Result<Track> {
@@ -400,7 +413,7 @@ fn read_stream_info_block<B: ReadBytes + FiniteStream>(
 
     // Read the stream information block as a boxed slice so that it may be attached as extra
     // data on the codec parameters.
-    let extra_data = reader.read_boxed_slice_exact(reader.byte_len() as usize)?;
+    let extra_data = reader.read_boxed_slice_exact(reader.byte_len() as usize).await?;
 
     // Parse the stream info block.
     let info = StreamInfo::read(&mut BufReader::new(&extra_data))?;

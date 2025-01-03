@@ -5,6 +5,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use futures_util::FutureExt;
 use symphonia_common::xiph::audio::flac::StreamInfo;
 use symphonia_core::checksum::Crc16Ansi;
 use symphonia_core::errors::{Error, Result};
@@ -144,7 +145,7 @@ impl Fragment {
     fn parse_header(&self) -> FrameHeader {
         let mut reader = BufReader::new(&self.data);
         let sync = reader.read_be_u16().unwrap();
-        read_frame_header(&mut reader, sync).unwrap()
+        read_frame_header(&mut reader, sync).now_or_never().unwrap().unwrap()
     }
 }
 
@@ -305,7 +306,7 @@ impl PacketParser {
     /// Tries to read a fragment upto the maximum size of a FLAC frame using the reader and returns
     /// it. If a fragment cannot be read, then the reader has lost synchronization and must be
     /// resynchronized.
-    fn try_read_fragment<B>(
+    async fn try_read_fragment<B>(
         &self,
         reader: &mut B,
         avg_frame_size: usize,
@@ -326,7 +327,7 @@ impl PacketParser {
         // Do the initial read.
         //
         // Note: This will always read atleast a single byte, or return an error (i.e., EOF).
-        let mut end = reader.read_buf(&mut buf)?;
+        let mut end = reader.read_buf(&mut buf).await?;
 
         // Invariant: The packet parser was synchronized before starting to read_fragment.
         //
@@ -351,7 +352,9 @@ impl PacketParser {
                 // frame header in its entirety.
                 if is_likely_frame_header(frame) {
                     // Parse the frame header from the frame buffer.
-                    if let Ok(header) = read_frame_header(&mut BufReader::new(&frame[2..]), sync) {
+                    if let Ok(header) =
+                        read_frame_header(&mut BufReader::new(&frame[2..]), sync).await
+                    {
                         // Get the last header to check monotonicity in the strict header check.
                         let last_header = self.builder.last_header();
 
@@ -391,7 +394,7 @@ impl PacketParser {
             pos = end.saturating_sub(FLAC_MAX_FRAME_HEADER_SIZE);
 
             // Read the new chunk.
-            end += match reader.read_buf(&mut buf[end..next_read_end]) {
+            end += match reader.read_buf(&mut buf[end..next_read_end]).await {
                 Ok(read) => read,
                 Err(_) => break 'found end,
             }
@@ -412,24 +415,24 @@ impl PacketParser {
     }
 
     /// Reads a fragment using the reader and performs resynchronization when necessary.
-    fn read_fragment<B>(&mut self, reader: &mut B, avg_frame_size: usize) -> Result<Fragment>
+    async fn read_fragment<B>(&mut self, reader: &mut B, avg_frame_size: usize) -> Result<Fragment>
     where
         B: ReadBytes + SeekBuffered,
     {
         loop {
-            if let Some(fragment) = self.try_read_fragment(reader, avg_frame_size)? {
+            if let Some(fragment) = self.try_read_fragment(reader, avg_frame_size).await? {
                 return Ok(fragment);
             }
 
             // If a fragment could not be read, synchronization was lost. Try to resync.
             warn!("synchronization lost");
-            let _ = self.resync(reader)?;
+            let _ = self.resync(reader).await?;
         }
     }
 
     /// Reads a fragment or handles end-of-stream using the reader. Performs resynchronization when
     /// necessary.
-    fn read_fragment_or_eos<B>(
+    async fn read_fragment_or_eos<B>(
         &mut self,
         reader: &mut B,
         avg_frame_size: usize,
@@ -437,7 +440,7 @@ impl PacketParser {
     where
         B: ReadBytes + SeekBuffered,
     {
-        match self.read_fragment(reader, avg_frame_size) {
+        match self.read_fragment(reader, avg_frame_size).await {
             Ok(fragment) => Ok(Some(fragment)),
             Err(Error::IoError(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
                 // If the required information is available, verify that atleast the expected number
@@ -466,7 +469,7 @@ impl PacketParser {
     }
 
     /// Parse the next packet from the stream.
-    pub fn parse<B>(&mut self, reader: &mut B) -> Result<Option<Packet>>
+    pub async fn parse<B>(&mut self, reader: &mut B) -> Result<Option<Packet>>
     where
         B: ReadBytes + SeekBuffered,
     {
@@ -477,7 +480,7 @@ impl PacketParser {
 
         // Build a packet.
         let parsed = loop {
-            let fragment = match self.read_fragment_or_eos(reader, avg_frame_size)? {
+            let fragment = match self.read_fragment_or_eos(reader, avg_frame_size).await? {
                 Some(fragment) => fragment,
                 None => return Ok(None),
             };
@@ -494,7 +497,7 @@ impl PacketParser {
     }
 
     /// Resync the reader to the start of the next frame.
-    pub fn resync<B>(&mut self, reader: &mut B) -> Result<SyncInfo>
+    pub async fn resync<B>(&mut self, reader: &mut B) -> Result<SyncInfo>
     where
         B: ReadBytes + SeekBuffered,
     {
@@ -503,11 +506,11 @@ impl PacketParser {
         let mut frame_pos;
 
         let header = loop {
-            let sync = sync_frame(reader)?;
+            let sync = sync_frame(reader).await?;
 
             frame_pos = reader.pos() - 2;
 
-            if let Ok(header) = read_frame_header(reader, sync) {
+            if let Ok(header) = read_frame_header(reader, sync).await {
                 // Do a strict frame header check with no previous header.
                 if strict_frame_header_check(&self.info, &header, None) {
                     break header;

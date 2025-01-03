@@ -31,33 +31,33 @@ pub struct PageHeader {
 }
 
 /// Reads a `PageHeader` from the the provided reader.
-fn read_page_header<B: ReadBytes>(reader: &mut B) -> Result<PageHeader> {
+async fn read_page_header<B: ReadBytes>(reader: &mut B) -> Result<PageHeader> {
     // The OggS marker should be present.
-    let marker = reader.read_quad_bytes()?;
+    let marker = reader.read_quad_bytes().await?;
 
     if marker != OGG_PAGE_MARKER {
         return decode_error("ogg: missing ogg stream marker");
     }
 
-    let version = reader.read_byte()?;
+    let version = reader.read_byte().await?;
 
     // There is only one OGG version, and that is version 0.
     if version != 0 {
         return decode_error("ogg: invalid ogg version");
     }
 
-    let flags = reader.read_byte()?;
+    let flags = reader.read_byte().await?;
 
     // Only the first 3 least-significant bits are used for flags.
     if flags & 0xf8 != 0 {
         return decode_error("ogg: invalid flag bits set");
     }
 
-    let ts = reader.read_u64()?;
-    let serial = reader.read_u32()?;
-    let sequence = reader.read_u32()?;
-    let crc = reader.read_u32()?;
-    let n_segments = reader.read_byte()?;
+    let ts = reader.read_u64().await?;
+    let serial = reader.read_u32().await?;
+    let sequence = reader.read_u32().await?;
+    let crc = reader.read_u32().await?;
+    let n_segments = reader.read_byte().await?;
 
     Ok(PageHeader {
         version,
@@ -74,12 +74,12 @@ fn read_page_header<B: ReadBytes>(reader: &mut B) -> Result<PageHeader> {
 
 /// Quickly synchronizes the provided reader to the next OGG page capture pattern, but does not
 /// perform any further verification.
-fn sync_page<B: ReadBytes>(reader: &mut B) -> Result<()> {
-    let mut marker = u32::from_be_bytes(reader.read_quad_bytes()?);
+async fn sync_page<B: ReadBytes>(reader: &mut B) -> Result<()> {
+    let mut marker = u32::from_be_bytes(reader.read_quad_bytes().await?);
 
     while marker.to_be_bytes() != OGG_PAGE_MARKER {
         marker <<= 8;
-        marker |= u32::from(reader.read_u8()?);
+        marker |= u32::from(reader.read_u8().await?);
     }
 
     Ok(())
@@ -154,7 +154,7 @@ pub struct PageReader {
 }
 
 impl PageReader {
-    pub fn try_new<B>(reader: &mut B) -> Result<Self>
+    pub async fn try_new<B>(reader: &mut B) -> Result<Self>
     where
         B: ReadBytes + SeekBuffered,
     {
@@ -165,13 +165,13 @@ impl PageReader {
             page_buf_len: 0,
         };
 
-        page_reader.try_next_page(reader)?;
+        page_reader.try_next_page(reader).await?;
 
         Ok(page_reader)
     }
 
     /// Attempts to read the next page. If the page is corrupted or invalid, returns an error.
-    pub fn try_next_page<B>(&mut self, reader: &mut B) -> Result<()>
+    pub async fn try_next_page<B>(&mut self, reader: &mut B) -> Result<()>
     where
         B: ReadBytes + SeekBuffered,
     {
@@ -179,17 +179,17 @@ impl PageReader {
         header_buf[..4].copy_from_slice(&OGG_PAGE_MARKER);
 
         // Synchronize to an OGG page capture pattern.
-        sync_page(reader)?;
+        sync_page(reader).await?;
 
         // Record the position immediately after synchronization. If the page is found corrupt the
         // reader will need to seek back here to try to regain synchronization.
         let sync_pos = reader.pos();
 
         // Read the part of the page header after the capture pattern into a buffer.
-        reader.read_buf_exact(&mut header_buf[4..])?;
+        reader.read_buf_exact(&mut header_buf[4..]).await?;
 
         // Parse the page header buffer.
-        let header = read_page_header(&mut BufReader::new(&header_buf))?;
+        let header = read_page_header(&mut BufReader::new(&header_buf)).await?;
 
         // debug!(
         //     "page {{ version={}, absgp={}, serial={}, sequence={}, crc={:#x}, n_segments={}, \
@@ -225,7 +225,7 @@ impl PageReader {
         self.packet_lens.clear();
 
         for _ in 0..header.n_segments {
-            let seg_len = crc32_reader.read_byte()?;
+            let seg_len = crc32_reader.read_byte().await?;
 
             page_body_len += usize::from(seg_len);
             packet_len += u16::from(seg_len);
@@ -238,7 +238,7 @@ impl PageReader {
             }
         }
 
-        self.read_page_body(&mut crc32_reader, page_body_len)?;
+        self.read_page_body(&mut crc32_reader, page_body_len).await?;
 
         let calculated_crc = crc32_reader.monitor().crc();
 
@@ -263,12 +263,12 @@ impl PageReader {
 
     /// Reads the next page. If the next page is corrupted or invalid, the page is discarded and
     /// the reader tries again until a valid page is read or end-of-stream.
-    pub fn next_page<B>(&mut self, reader: &mut B) -> Result<()>
+    pub async fn next_page<B>(&mut self, reader: &mut B) -> Result<()>
     where
         B: ReadBytes + SeekBuffered,
     {
         loop {
-            match self.try_next_page(reader) {
+            match self.try_next_page(reader).await {
                 Ok(_) => break,
                 Err(Error::IoError(e)) => return Err(Error::from(e)),
                 _ => (),
@@ -279,12 +279,12 @@ impl PageReader {
 
     /// Reads the next page with a specific serial. If the next page is corrupted or invalid, the
     /// page is discarded and the reader tries again until a valid page is read or end-of-stream.
-    pub fn next_page_for_serial<B>(&mut self, reader: &mut B, serial: u32) -> Result<()>
+    pub async fn next_page_for_serial<B>(&mut self, reader: &mut B, serial: u32) -> Result<()>
     where
         B: ReadBytes + SeekBuffered,
     {
         loop {
-            match self.try_next_page(reader) {
+            match self.try_next_page(reader).await {
                 Ok(_) => {
                     // Exit if a page with the specific serial is found.
                     if self.header.serial == serial && !self.header.is_continuation {
@@ -319,7 +319,7 @@ impl PageReader {
         }
     }
 
-    fn read_page_body<B: ReadBytes>(&mut self, reader: &mut B, len: usize) -> Result<()> {
+    async fn read_page_body<B: ReadBytes>(&mut self, reader: &mut B, len: usize) -> Result<()> {
         // This is precondition.
         assert!(len <= 255 * 255);
 
@@ -333,7 +333,7 @@ impl PageReader {
 
         self.page_buf_len = len;
 
-        reader.read_buf_exact(&mut self.page_buf[..len])?;
+        reader.read_buf_exact(&mut self.page_buf[..len]).await?;
 
         Ok(())
     }
