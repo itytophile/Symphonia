@@ -147,8 +147,10 @@ pub type FormatFactoryFn = for<'s> fn(
 ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>>;
 
 /// `MetadataReader` probe factory function. Creates a boxed `MetadataReader`.
-pub type MetadataFactoryFn =
-    for<'s> fn(MediaSourceStream<'s>, MetadataOptions) -> BoxFuture<'s, Result<Box<dyn MetadataReader + 's>>>;
+pub type MetadataFactoryFn = for<'s> fn(
+    MediaSourceStream<'s>,
+    MetadataOptions,
+) -> BoxFuture<'s, Result<Box<dyn MetadataReader + 's>>>;
 
 /// A probe match is the result of one probe iteration on a given media source stream.
 ///

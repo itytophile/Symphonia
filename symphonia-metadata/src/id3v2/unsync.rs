@@ -109,7 +109,12 @@ impl<B: ReadBytes + FiniteStream> ReadBytes for UnsyncStream<B> {
     }
 
     async fn read_quad_bytes(&mut self) -> io::Result<[u8; 4]> {
-        Ok([self.read_byte().await?, self.read_byte().await?, self.read_byte().await?, self.read_byte().await?])
+        Ok([
+            self.read_byte().await?,
+            self.read_byte().await?,
+            self.read_byte().await?,
+            self.read_byte().await?,
+        ])
     }
 
     async fn read_buf(&mut self, _: &mut [u8]) -> io::Result<usize> {
@@ -201,13 +206,12 @@ mod tests {
             // 0b0000_1111 has a 0 in 16's place so testing mask & 16 will ensure this is working.
             let mut stream = BufReader::new(&[16, 16, 16, 16, 16]);
             assert_eq!(541098240, read_syncsafe_leq32(&mut stream, 32).await.unwrap());
-    
+
             let mut stream = BufReader::new(&[3, 4, 80, 1]);
             assert_eq!(6367233, read_syncsafe_leq32(&mut stream, 28).await.unwrap());
-    
+
             let mut stream = BufReader::new(&[3, 4, 80, 1]);
             assert_eq!(0, read_syncsafe_leq32(&mut stream, 0).await.unwrap());
         });
-        
     }
 }

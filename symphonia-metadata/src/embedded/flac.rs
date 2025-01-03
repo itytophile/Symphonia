@@ -90,25 +90,25 @@ pub async fn read_flac_picture_block<B: ReadBytes>(reader: &mut B) -> Result<Vis
     }
 
     // Read the width, and height of the visual.
-    let width = reader.read_be_u32()?;
-    let height = reader.read_be_u32()?;
+    let width = reader.read_be_u32().await?;
+    let height = reader.read_be_u32().await?;
 
     // If either the width or height is 0, then the size is invalid.
     let dimensions = if width > 0 && height > 0 { Some(Size { width, height }) } else { None };
 
     // Read bits-per-pixel of the visual.
-    let _bits_per_pixel = NonZeroU8::new(reader.read_be_u32()? as u8);
+    let _bits_per_pixel = NonZeroU8::new(reader.read_be_u32().await? as u8);
 
     // Indexed colours is only valid for image formats that use an indexed colour palette. If it is
     // 0, the image does not used indexed colours.
-    let _color_mode = reader.read_be_u32()?;
+    let _color_mode = reader.read_be_u32().await?;
 
     // Read the image data length in bytes.
     // TODO: Apply a limit.
-    let data_len = reader.read_be_u32()? as usize;
+    let data_len = reader.read_be_u32().await? as usize;
 
     // Read the image data.
-    let data = reader.read_boxed_slice_exact(data_len)?;
+    let data = reader.read_boxed_slice_exact(data_len).await?;
 
     // Try to detect the image characteristics from the image data. Detect image characteristics
     // will be preferred over what's been stated in the picture block.
@@ -125,7 +125,7 @@ pub async fn read_flac_picture_block<B: ReadBytes>(reader: &mut B) -> Result<Vis
 }
 
 /// Read a seek table metadata block as a seek index.
-pub fn read_flac_seektable_block<B: ReadBytes>(
+pub async fn read_flac_seektable_block<B: ReadBytes>(
     reader: &mut B,
     block_length: u32,
 ) -> Result<SeekIndex> {
@@ -136,16 +136,20 @@ pub fn read_flac_seektable_block<B: ReadBytes>(
     let mut index = SeekIndex::new();
 
     for _ in 0..count {
-        let sample = reader.read_be_u64()?;
+        let sample = reader.read_be_u64().await?;
 
         // A sample value of 0xFFFFFFFFFFFFFFFF is designated as a placeholder and is to be
         // ignored by decoders. The remaining 10 bytes of the seek point are undefined and must
         // still be consumed.
         if sample != 0xffff_ffff_ffff_ffff {
-            index.insert(sample, reader.read_be_u64()?, u32::from(reader.read_be_u16()?));
+            index.insert(
+                sample,
+                reader.read_be_u64().await?,
+                u32::from(reader.read_be_u16().await?),
+            );
         }
         else {
-            reader.ignore_bytes(10)?;
+            reader.ignore_bytes(10).await?;
         }
     }
 
@@ -153,26 +157,26 @@ pub fn read_flac_seektable_block<B: ReadBytes>(
 }
 
 /// Read a vendor-specific application metadata block as vendor data.
-pub fn read_flac_application_block<B: ReadBytes>(
+pub async fn read_flac_application_block<B: ReadBytes>(
     reader: &mut B,
     block_length: u32,
 ) -> Result<VendorDataAttachment> {
     // Read the application identifier. Usually this is just 4 ASCII characters, but it is not
     // limited to that. Non-printable ASCII characters must be escaped to create a valid UTF8
     // string.
-    let ident = escape_identifier(&reader.read_quad_bytes()?);
-    let data = reader.read_boxed_slice_exact(block_length as usize - 4)?;
+    let ident = escape_identifier(&reader.read_quad_bytes().await?);
+    let data = reader.read_boxed_slice_exact(block_length as usize - 4).await?;
     Ok(VendorDataAttachment { ident, data })
 }
 
 /// Read a cuesheet metadata block as a chapter group.
-pub fn read_flac_cuesheet_block<B: ReadBytes>(
+pub async fn read_flac_cuesheet_block<B: ReadBytes>(
     reader: &mut B,
     tb: TimeBase,
 ) -> Result<ChapterGroup> {
     // Read cuesheet catalog number. The catalog number only allows printable ASCII characters.
     let mut catalog_number_buf = vec![0u8; 128];
-    reader.read_buf_exact(&mut catalog_number_buf)?;
+    reader.read_buf_exact(&mut catalog_number_buf).await?;
 
     // Read the catalog number, and store it in a Tag to be attached to the chapter group.
     let catalog_number = match printable_ascii_to_string(&catalog_number_buf) {
@@ -184,10 +188,10 @@ pub fn read_flac_cuesheet_block<B: ReadBytes>(
     };
 
     // Number of lead-in samples.
-    let n_lead_in_samples = reader.read_be_u64()?;
+    let n_lead_in_samples = reader.read_be_u64().await?;
 
     // Next bit is set for CD-DA cuesheets.
-    let is_cdda = (reader.read_u8()? & 0x80) == 0x80;
+    let is_cdda = (reader.read_u8().await? & 0x80) == 0x80;
 
     // Lead-in should be non-zero only for CD-DA cuesheets.
     if !is_cdda && n_lead_in_samples > 0 {
@@ -196,12 +200,12 @@ pub fn read_flac_cuesheet_block<B: ReadBytes>(
 
     // Next 258 bytes (read as 129 u16's) must be zero.
     for _ in 0..129 {
-        if reader.read_be_u16()? != 0 {
+        if reader.read_be_u16().await? != 0 {
             return decode_error("flac: cuesheet reserved bits should be zero");
         }
     }
 
-    let n_tracks = reader.read_u8()?;
+    let n_tracks = reader.read_u8().await?;
 
     // There should be at-least one track in the cuesheet.
     if n_tracks == 0 {
@@ -220,18 +224,18 @@ pub fn read_flac_cuesheet_block<B: ReadBytes>(
     };
 
     for _ in 0..n_tracks {
-        group.items.push(read_flac_cuesheet_track(reader, is_cdda, tb)?);
+        group.items.push(read_flac_cuesheet_track(reader, is_cdda, tb).await?);
     }
 
     Ok(group)
 }
 
-fn read_flac_cuesheet_track<B: ReadBytes>(
+async fn read_flac_cuesheet_track<B: ReadBytes>(
     reader: &mut B,
     is_cdda: bool,
     tb: TimeBase,
 ) -> Result<ChapterGroupItem> {
-    let n_offset_samples = reader.read_be_u64()?;
+    let n_offset_samples = reader.read_be_u64().await?;
 
     // For a CD-DA cuesheet, the track sample offset is the same as the first index (INDEX 00 or
     // INDEX 01) on the CD. Therefore, the offset must be a multiple of 588 samples
@@ -242,7 +246,7 @@ fn read_flac_cuesheet_track<B: ReadBytes>(
         );
     }
 
-    let number = u32::from(reader.read_u8()?);
+    let number = u32::from(reader.read_u8().await?);
 
     // A track number of 0 is disallowed in all cases. For CD-DA cuesheets, track 0 is reserved for
     // lead-in.
@@ -259,7 +263,7 @@ fn read_flac_cuesheet_track<B: ReadBytes>(
     }
 
     let mut isrc_buf = vec![0u8; 12];
-    reader.read_buf_exact(&mut isrc_buf)?;
+    reader.read_buf_exact(&mut isrc_buf).await?;
 
     let isrc = match printable_ascii_to_string(&isrc_buf) {
         Some(num) => {
@@ -271,7 +275,7 @@ fn read_flac_cuesheet_track<B: ReadBytes>(
 
     // Next 14 bytes are reserved. However, the first two bits are flags. Consume the reserved bytes
     // in u16 chunks a minor performance improvement.
-    let flags = reader.read_be_u16()?;
+    let flags = reader.read_be_u16().await?;
 
     // These values are contained in the Cuesheet but have no analogue in Symphonia.
     let _is_audio = (flags & 0x8000) == 0x0000;
@@ -283,12 +287,12 @@ fn read_flac_cuesheet_track<B: ReadBytes>(
 
     // Consume the remaining 12 bytes read in 3 u32 chunks.
     for _ in 0..3 {
-        if reader.read_be_u32()? != 0 {
+        if reader.read_be_u32().await? != 0 {
             return decode_error("flac: cuesheet track reserved bits should be zero");
         }
     }
 
-    let n_indicies = reader.read_u8()? as usize;
+    let n_indicies = reader.read_u8().await? as usize;
 
     // For CD-DA cuesheets, the track index cannot exceed 100 indicies.
     if is_cdda && n_indicies > 100 {
@@ -306,7 +310,8 @@ fn read_flac_cuesheet_track<B: ReadBytes>(
 
         // Add each index as a chapter.
         for _ in 0..n_indicies {
-            let index = read_flac_cuesheet_track_index(reader, is_cdda, n_offset_samples, tb)?;
+            let index =
+                read_flac_cuesheet_track_index(reader, is_cdda, n_offset_samples, tb).await?;
 
             group.items.push(ChapterGroupItem::Chapter(index));
         }
@@ -328,14 +333,14 @@ fn read_flac_cuesheet_track<B: ReadBytes>(
     }
 }
 
-fn read_flac_cuesheet_track_index<B: ReadBytes>(
+async fn read_flac_cuesheet_track_index<B: ReadBytes>(
     reader: &mut B,
     is_cdda: bool,
     track_ts: u64,
     tb: TimeBase,
 ) -> Result<Chapter> {
-    let n_offset_samples = reader.read_be_u64()?;
-    let idx_number_raw = reader.read_be_u32()?;
+    let n_offset_samples = reader.read_be_u64().await?;
+    let idx_number_raw = reader.read_be_u32().await?;
 
     // CD-DA track index points must have a sample offset that is a multiple of 588 samples
     // (588 samples = 44100 samples/sec * 1/75th of a sec).

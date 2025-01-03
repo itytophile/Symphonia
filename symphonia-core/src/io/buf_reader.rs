@@ -208,7 +208,6 @@ impl<'a> BufReader<'a> {
         Ok(u32::from_le_bytes(self.read_quad_bytes()?))
     }
 
-
     #[inline(always)]
     pub fn read_be_u32(&mut self) -> io::Result<u32> {
         Ok(u32::from_be_bytes(self.read_quad_bytes()?))

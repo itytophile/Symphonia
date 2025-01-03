@@ -344,7 +344,8 @@ impl AsyncFormatReader for AsyncAdtsReader<'_> {
                 // seek cannot be completed.
                 if let Some(tb) = self.tracks[0].time_base {
                     tb.calc_timestamp(time)
-                } else {
+                }
+                else {
                     return seek_error(SeekErrorKind::Unseekable);
                 }
             }
@@ -364,7 +365,8 @@ impl AsyncFormatReader for AsyncAdtsReader<'_> {
                 if seeked_pos != self.first_frame_pos {
                     return seek_error(SeekErrorKind::Unseekable);
                 }
-            } else {
+            }
+            else {
                 return seek_error(SeekErrorKind::ForwardOnly);
             }
 
@@ -430,7 +432,8 @@ async fn approximate_frame_count(mut source: &mut MediaSourceStream<'_>) -> Resu
         let mut scoped_stream = ScopedStream::new(&mut source, MAX_LEN);
 
         loop {
-            let Ok(header) = AdtsHeader::read(&mut scoped_stream).await else {
+            let Ok(header) = AdtsHeader::read(&mut scoped_stream).await
+            else {
                 break;
             };
 
@@ -443,7 +446,8 @@ async fn approximate_frame_count(mut source: &mut MediaSourceStream<'_>) -> Resu
         }
 
         let _ = source.seek_buffered(original_pos);
-    } else {
+    }
+    else {
         // The number of points to sample within the stream.
         const NUM_SAMPLE_POINTS: u64 = 4;
 

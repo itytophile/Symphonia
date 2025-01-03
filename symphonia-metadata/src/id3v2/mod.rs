@@ -13,13 +13,13 @@ use futures_util::future::{self, BoxFuture};
 use futures_util::FutureExt;
 use symphonia_core::errors::{decode_error, unsupported_error, Result};
 use symphonia_core::formats::probe::{ProbeMetadataData, ProbeableMetadata, Score, Scoreable};
-use symphonia_core::{async_trait, io::*};
 use symphonia_core::meta::well_known::METADATA_ID_ID3V2;
 use symphonia_core::meta::{
     ChapterGroup, ChapterGroupItem, MetadataBuffer, MetadataBuilder, MetadataInfo, MetadataOptions,
     MetadataReader, MetadataSideData,
 };
 use symphonia_core::support_metadata;
+use symphonia_core::{async_trait, io::*};
 
 use log::{debug, trace};
 

@@ -592,7 +592,9 @@ pub async fn read_id3v2p3_frame<B: ReadBytes>(reader: &mut B) -> Result<FrameRes
 }
 
 /// Read an ID3v2.4 frame.
-pub async fn read_id3v2p4_frame<B: ReadBytes + FiniteStream>(reader: &mut B) -> Result<FrameResult> {
+pub async fn read_id3v2p4_frame<B: ReadBytes + FiniteStream>(
+    reader: &mut B,
+) -> Result<FrameResult> {
     let id = reader.read_quad_bytes().await?;
 
     // Check if the frame id contains valid characters. If it does not, then assume the rest of the

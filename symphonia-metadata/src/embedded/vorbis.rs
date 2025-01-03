@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+use futures_util::FutureExt;
 use lazy_static::lazy_static;
 use log::warn;
 
@@ -155,7 +156,10 @@ fn parse_base64_picture_block(b64: &str) -> Result<ParsedComment> {
         return decode_error("meta(vorbis): the base64 encoding of a picture block is invalid");
     };
 
-    flac::read_flac_picture_block(&mut BufReader::new(&data)).map(ParsedComment::Visual)
+    flac::read_flac_picture_block(&mut BufReader::new(&data))
+        .now_or_never()
+        .unwrap()
+        .map(ParsedComment::Visual)
 }
 
 /// Parse a string containing a base64 encoding image file into a visual.
