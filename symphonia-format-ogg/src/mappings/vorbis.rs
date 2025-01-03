@@ -8,13 +8,14 @@
 use super::{MapResult, Mapper, PacketParser};
 use crate::common::SideData;
 
+use futures_util::FutureExt;
 use symphonia_common::xiph::audio::vorbis::*;
 use symphonia_core::codecs::audio::well_known::CODEC_ID_VORBIS;
 use symphonia_core::codecs::audio::AudioCodecParameters;
 use symphonia_core::codecs::CodecParameters;
 use symphonia_core::errors::{decode_error, unsupported_error, Result};
 use symphonia_core::formats::Track;
-use symphonia_core::io::{BitReaderRtl, BufReader, ReadBitsRtl, ReadBytes};
+use symphonia_core::io::{BitReaderRtl, BufReader, ReadBitsRtl};
 use symphonia_core::meta::MetadataBuilder;
 use symphonia_metadata::embedded::vorbis::*;
 
@@ -213,7 +214,9 @@ impl Mapper for VorbisMapper {
                     let mut builder = MetadataBuilder::new();
                     let mut side_data = Default::default();
 
-                    read_vorbis_comment(&mut reader, &mut builder, &mut side_data)?;
+                    read_vorbis_comment(&mut reader, &mut builder, &mut side_data)
+                        .now_or_never()
+                        .unwrap()?;
 
                     let rev = builder.metadata();
 
@@ -294,7 +297,7 @@ struct IdentHeader {
     bs1_exp: u8,
 }
 
-fn read_ident_header<B: ReadBytes>(reader: &mut B) -> Result<IdentHeader> {
+fn read_ident_header(reader: &mut BufReader<'_>) -> Result<IdentHeader> {
     // The packet type must be an identification header.
     let packet_type = reader.read_u8()?;
 

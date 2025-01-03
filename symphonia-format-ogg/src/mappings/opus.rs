@@ -9,13 +9,14 @@ use crate::common::SideData;
 
 use super::{MapResult, Mapper, PacketParser};
 
+use futures_util::FutureExt;
 use symphonia_core::audio::{Channels, Position};
 use symphonia_core::codecs::audio::well_known::CODEC_ID_OPUS;
 use symphonia_core::codecs::audio::AudioCodecParameters;
 use symphonia_core::codecs::CodecParameters;
 use symphonia_core::errors::Result;
 use symphonia_core::formats::Track;
-use symphonia_core::io::{BufReader, ReadBytes};
+use symphonia_core::io::BufReader;
 use symphonia_core::meta::MetadataBuilder;
 
 use symphonia_metadata::embedded::vorbis;
@@ -257,7 +258,9 @@ impl Mapper for OpusMapper {
                 let mut builder = MetadataBuilder::new();
                 let mut side_data = Default::default();
 
-                vorbis::read_vorbis_comment(&mut reader, &mut builder, &mut side_data)?;
+                vorbis::read_vorbis_comment(&mut reader, &mut builder, &mut side_data)
+                    .now_or_never()
+                    .unwrap()?;
 
                 let rev = builder.metadata();
 

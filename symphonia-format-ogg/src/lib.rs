@@ -21,4 +21,4 @@ mod mappings;
 mod page;
 mod physical;
 
-pub use demuxer::AsyncOggReader;
+pub use demuxer::{AsyncOggReader, OggReader};
