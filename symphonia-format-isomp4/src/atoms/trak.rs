@@ -25,23 +25,23 @@ pub struct TrakAtom {
 }
 
 impl Atom for TrakAtom {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         let mut iter = AtomIterator::new(reader, header);
 
         let mut tkhd = None;
         let mut edts = None;
         let mut mdia = None;
 
-        while let Some(header) = iter.next()? {
+        while let Some(header) = iter.next().await? {
             match header.atom_type {
                 AtomType::TrackHeader => {
-                    tkhd = Some(iter.read_atom::<TkhdAtom>()?);
+                    tkhd = Some(iter.read_atom::<TkhdAtom>().await?);
                 }
                 AtomType::Edit => {
-                    edts = Some(iter.read_atom::<EdtsAtom>()?);
+                    edts = Some(iter.read_atom::<EdtsAtom>().await?);
                 }
                 AtomType::Media => {
-                    mdia = Some(iter.read_atom::<MdiaAtom>()?);
+                    mdia = Some(iter.read_atom::<MdiaAtom>().await?);
                 }
                 _ => (),
             }

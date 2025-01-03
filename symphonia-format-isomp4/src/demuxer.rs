@@ -5,19 +5,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use symphonia_core::support_format;
+use futures_util::future::{self, BoxFuture};
+use futures_util::FutureExt;
+use symphonia_core::{async_trait, support_format};
 
 use symphonia_core::errors::{
     decode_error, seek_error, unsupported_error, Error, Result, SeekErrorKind,
 };
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::well_known::FORMAT_ID_ISOMP4;
-use symphonia_core::formats::{prelude::*, FormatReaderInfo};
+use symphonia_core::formats::{
+    prelude::*, AsyncFormatReader, BlockingFormatReader, FormatReaderInfo,
+};
 use symphonia_core::io::*;
 use symphonia_core::meta::{Metadata, MetadataLog};
 use symphonia_core::units::Time;
 
-use std::io::{Seek, SeekFrom};
+use std::io::SeekFrom;
 use std::sync::Arc;
 
 use crate::atoms::{AtomIterator, AtomType};
@@ -99,7 +103,7 @@ struct SampleDataInfo {
 /// ISO Base Media File Format (MP4, M4A, MOV, etc.) demultiplexer.
 ///
 /// `IsoMp4Reader` implements a demuxer for the ISO Base Media File Format.
-pub struct IsoMp4Reader<'s> {
+pub struct AsyncIsoMp4Reader<'s> {
     iter: AtomIterator<MediaSourceStream<'s>>,
     tracks: Vec<Track>,
     metadata: MetadataLog,
@@ -111,8 +115,10 @@ pub struct IsoMp4Reader<'s> {
     moov: Arc<MoovAtom>,
 }
 
-impl<'s> IsoMp4Reader<'s> {
-    pub fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+pub type IsoMp4Reader<'s> = BlockingFormatReader<AsyncIsoMp4Reader<'s>>;
+
+impl<'s> AsyncIsoMp4Reader<'s> {
+    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         // To get to beginning of the atom.
         mss.seek_buffered_rel(-4);
 
@@ -125,8 +131,8 @@ impl<'s> IsoMp4Reader<'s> {
         // Get the total length of the stream, if possible.
         let total_len = if is_seekable {
             let pos = mss.pos();
-            let len = mss.seek(SeekFrom::End(0))?;
-            mss.seek(SeekFrom::Start(pos))?;
+            let len = mss.seek(SeekFrom::End(0)).await?;
+            mss.seek(SeekFrom::Start(pos)).await?;
             info!("stream is seekable with len={} bytes.", len);
             Some(len)
         }
@@ -139,27 +145,27 @@ impl<'s> IsoMp4Reader<'s> {
         // Parse all atoms if the stream is seekable, otherwise parse all atoms up-to the mdat atom.
         let mut iter = AtomIterator::new_root(mss, total_len);
 
-        while let Some(header) = iter.next()? {
+        while let Some(header) = iter.next().await? {
             // Top-level atoms.
             match header.atom_type() {
                 AtomType::FileType => {
-                    ftyp = Some(iter.read_atom::<FtypAtom>()?);
+                    ftyp = Some(iter.read_atom::<FtypAtom>().await?);
                 }
                 AtomType::Movie => {
-                    moov = Some(iter.read_atom::<MoovAtom>()?);
+                    moov = Some(iter.read_atom::<MoovAtom>().await?);
                 }
                 AtomType::SegmentIndex => {
                     // If the stream is not seekable, then it can only be assumed that the first
                     // segment index atom is indeed the first segment index because the format
                     // reader cannot practically skip past this point.
                     if !is_seekable {
-                        sidx = Some(iter.read_atom::<SidxAtom>()?);
+                        sidx = Some(iter.read_atom::<SidxAtom>().await?);
                         break;
                     }
                     else {
                         // If the stream is seekable, examine all segment indexes and select the
                         // index with the earliest presentation timestamp to be the first.
-                        let new_sidx = iter.read_atom::<SidxAtom>()?;
+                        let new_sidx = iter.read_atom::<SidxAtom>().await?;
 
                         let is_earlier = match &sidx {
                             Some(sidx) => new_sidx.earliest_pts < sidx.earliest_pts,
@@ -188,7 +194,7 @@ impl<'s> IsoMp4Reader<'s> {
                 }
                 AtomType::Meta => {
                     // Read the metadata atom and append it to the log.
-                    let mut meta = iter.read_atom::<MetaAtom>()?;
+                    let mut meta = iter.read_atom::<MetaAtom>().await?;
 
                     if let Some(rev) = meta.take_metadata() {
                         metadata.push(rev);
@@ -215,11 +221,11 @@ impl<'s> IsoMp4Reader<'s> {
         // iterator is currently positioned at the first mdat atom.
         if is_seekable {
             let mut mss = iter.into_inner();
-            mss.seek(SeekFrom::Start(0))?;
+            mss.seek(SeekFrom::Start(0)).await?;
 
             iter = AtomIterator::new_root(mss, total_len);
 
-            while let Some(header) = iter.next_no_consume()? {
+            while let Some(header) = iter.next_no_consume().await? {
                 match header.atom_type() {
                     AtomType::MediaData | AtomType::MovieFragment => break,
                     _ => (),
@@ -267,7 +273,7 @@ impl<'s> IsoMp4Reader<'s> {
 
         let segs: Vec<Box<dyn StreamSegment>> = vec![Box::new(MoovSegment::new(moov.clone()))];
 
-        Ok(IsoMp4Reader { iter, tracks, metadata, track_states, segs, moov })
+        Ok(AsyncIsoMp4Reader { iter, tracks, metadata, track_states, segs, moov })
     }
 
     /// Idempotently gets information regarding the next sample of the media stream. This function
@@ -353,7 +359,7 @@ impl<'s> IsoMp4Reader<'s> {
         Ok(Some(SampleDataInfo { pos, len: sample_data_desc.size }))
     }
 
-    fn try_read_more_segments(&mut self) -> Result<bool> {
+    async fn try_read_more_segments(&mut self) -> Result<bool> {
         // If all tracks ended in the last segment, then do not try to read anymore segments.
         //
         // Note, there will always be one segment because the moov atom was converted into a segment
@@ -364,7 +370,7 @@ impl<'s> IsoMp4Reader<'s> {
 
         // Continue iterating over atoms until a segment (a moof + mdat atom pair) is found. All
         // other atoms will be ignored.
-        while let Some(header) = self.iter.next_no_consume()? {
+        while let Some(header) = self.iter.next_no_consume().await? {
             match header.atom_type() {
                 AtomType::MediaData => {
                     // Consume the atom from the iterator so that on the next iteration a new atom
@@ -374,7 +380,7 @@ impl<'s> IsoMp4Reader<'s> {
                     return Ok(true);
                 }
                 AtomType::MovieFragment => {
-                    let moof = self.iter.read_atom::<MoofAtom>()?;
+                    let moof = self.iter.read_atom::<MoofAtom>().await?;
 
                     // A moof segment can only be created if the media is fragmented.
                     if self.moov.is_fragmented() {
@@ -408,18 +414,18 @@ impl<'s> IsoMp4Reader<'s> {
         Ok(false)
     }
 
-    fn seek_track_by_time(&mut self, track_num: usize, time: Time) -> Result<SeekedTo> {
+    async fn seek_track_by_time(&mut self, track_num: usize, time: Time) -> Result<SeekedTo> {
         // Convert time to timestamp for the track.
         if let Some(track) = self.tracks.get(track_num) {
             let tb = track.time_base.unwrap();
-            self.seek_track_by_ts(track_num, tb.calc_timestamp(time))
+            self.seek_track_by_ts(track_num, tb.calc_timestamp(time)).await
         }
         else {
             seek_error(SeekErrorKind::Unseekable)
         }
     }
 
-    fn seek_track_by_ts(&mut self, track_num: usize, ts: u64) -> Result<SeekedTo> {
+    async fn seek_track_by_ts(&mut self, track_num: usize, ts: u64) -> Result<SeekedTo> {
         debug!("seeking track_num={} to frame_ts={}", track_num, ts);
 
         struct SeekLocation {
@@ -449,7 +455,7 @@ impl<'s> IsoMp4Reader<'s> {
             }
 
             // Otherwise, try to read more segments from the stream.
-            if !self.try_read_more_segments()? {
+            if !self.try_read_more_segments().await? {
                 return seek_error(SeekErrorKind::OutOfRange);
             }
         }
@@ -487,18 +493,23 @@ impl<'s> IsoMp4Reader<'s> {
     }
 }
 
-impl Scoreable for IsoMp4Reader<'_> {
-    fn score(_src: ScopedStream<&mut MediaSourceStream<'_>>) -> Result<Score> {
-        Ok(Score::Supported(255))
+impl Scoreable for AsyncIsoMp4Reader<'_> {
+    fn score<'s>(
+        _src: ScopedStream<&'s mut MediaSourceStream<'_>>,
+    ) -> BoxFuture<'s, Result<Score>> {
+        future::ok(Score::Supported(255)).boxed()
     }
 }
 
-impl ProbeableFormat<'_> for IsoMp4Reader<'_> {
+impl<'s> ProbeableFormat<'s> for AsyncIsoMp4Reader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'_>,
+        mss: MediaSourceStream<'s>,
         opts: FormatOptions,
-    ) -> Result<Box<dyn FormatReader + '_>> {
-        Ok(Box::new(IsoMp4Reader::try_new(mss, opts)?))
+    ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
+        async move {
+            Ok(Box::new(AsyncIsoMp4Reader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
+        }
+        .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
@@ -511,7 +522,7 @@ impl ProbeableFormat<'_> for IsoMp4Reader<'_> {
     }
 }
 
-impl FormatReaderInfo for IsoMp4Reader<'_> {
+impl FormatReaderInfo for AsyncIsoMp4Reader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &ISOMP4_FORMAT_INFO
     }
@@ -525,8 +536,9 @@ impl FormatReaderInfo for IsoMp4Reader<'_> {
     }
 }
 
-impl FormatReader for IsoMp4Reader<'_> {
-    fn next_packet(&mut self) -> Result<Option<Packet>> {
+#[async_trait]
+impl AsyncFormatReader for AsyncIsoMp4Reader<'_> {
+    async fn next_packet(&mut self) -> Result<Option<Packet>> {
         // Get the index of the track with the next-nearest (minimum) timestamp.
         let next_sample_info = loop {
             // Using the current set of segments, try to get the next sample info.
@@ -538,7 +550,7 @@ impl FormatReader for IsoMp4Reader<'_> {
                 // more segments coming. If the stream is seekable it might be fragmented and no segments are found in
                 // the moov atom. Iterate atoms until a new segment is found or the
                 // end-of-stream is reached
-                if !self.try_read_more_segments()? {
+                if !self.try_read_more_segments().await? {
                     return Ok(None);
                 }
             }
@@ -553,13 +565,13 @@ impl FormatReader for IsoMp4Reader<'_> {
         if reader.seek_buffered(sample_info.pos) != sample_info.pos {
             if reader.is_seekable() {
                 // Fallback to a slow seek if the stream is seekable.
-                reader.seek(SeekFrom::Start(sample_info.pos))?;
+                reader.seek(SeekFrom::Start(sample_info.pos)).await?;
             }
             else if sample_info.pos > reader.pos() {
                 // The stream is not seekable but the desired seek position is ahead of the reader's
                 // current position, thus the seek can be emulated by ignoring the bytes up to the
                 // the desired seek position.
-                reader.ignore_bytes(sample_info.pos - reader.pos())?;
+                reader.ignore_bytes(sample_info.pos - reader.pos()).await?;
             }
             else {
                 // The stream is not seekable and the desired seek position falls outside the lower
@@ -572,11 +584,11 @@ impl FormatReader for IsoMp4Reader<'_> {
             next_sample_info.track_id,
             next_sample_info.ts,
             u64::from(next_sample_info.dur),
-            reader.read_boxed_slice_exact(sample_info.len as usize)?,
+            reader.read_boxed_slice_exact(sample_info.len as usize).await?,
         )))
     }
 
-    fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
+    async fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
         if self.tracks.is_empty() {
             return seek_error(SeekErrorKind::Unseekable);
         }
@@ -595,12 +607,12 @@ impl FormatReader for IsoMp4Reader<'_> {
                     // Seek all tracks excluding the primary track to the desired time.
                     for t in 0..self.track_states.len() {
                         if t != track_num {
-                            self.seek_track_by_time(t, time)?;
+                            self.seek_track_by_time(t, time).await?;
                         }
                     }
 
                     // Seek the primary track and return the result.
-                    self.seek_track_by_ts(track_num, ts)
+                    self.seek_track_by_ts(track_num, ts).await
                 }
                 else {
                     seek_error(SeekErrorKind::InvalidTrack)
@@ -621,20 +633,13 @@ impl FormatReader for IsoMp4Reader<'_> {
                 // Seek all tracks excluding the selected track and discard the result.
                 for t in 0..self.track_states.len() {
                     if t != track_num {
-                        self.seek_track_by_time(t, time)?;
+                        self.seek_track_by_time(t, time).await?;
                     }
                 }
 
                 // Seek the primary track and return the result.
-                self.seek_track_by_time(track_num, time)
+                self.seek_track_by_time(track_num, time).await
             }
         }
-    }
-
-    fn into_inner<'s>(self: Box<Self>) -> MediaSourceStream<'s>
-    where
-        Self: 's,
-    {
-        self.iter.into_inner()
     }
 }

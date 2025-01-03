@@ -22,13 +22,13 @@ const SL_CONFIG_DESCRIPTOR: u8 = 0x06;
 
 const MIN_DESCRIPTOR_SIZE: u64 = 2;
 
-fn read_descriptor_header<B: ReadBytes>(reader: &mut B) -> Result<(u8, u32)> {
-    let tag = reader.read_u8()?;
+async fn read_descriptor_header<B: ReadBytes>(reader: &mut B) -> Result<(u8, u32)> {
+    let tag = reader.read_u8().await?;
 
     let mut size = 0;
 
     for _ in 0..4 {
-        let val = reader.read_u8()?;
+        let val = reader.read_u8().await?;
         size = (size << 7) | u32::from(val & 0x7f);
         if val & 0x80 == 0 {
             break;
@@ -47,8 +47,8 @@ pub struct EsdsAtom {
 }
 
 impl Atom for EsdsAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (_, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (_, _) = header.read_extended_header(reader).await?;
 
         // The ES descriptors occupy the rest of the atom.
         let ds_size = header
@@ -60,21 +60,21 @@ impl Atom for EsdsAtom {
         let mut descriptor = None;
 
         while scoped.bytes_available() > MIN_DESCRIPTOR_SIZE {
-            let (desc, desc_len) = read_descriptor_header(&mut scoped)?;
+            let (desc, desc_len) = read_descriptor_header(&mut scoped).await?;
 
             match desc {
                 ES_DESCRIPTOR => {
-                    descriptor = Some(ESDescriptor::read(&mut scoped, desc_len)?);
+                    descriptor = Some(ESDescriptor::read(&mut scoped, desc_len).await?);
                 }
                 _ => {
                     warn!("unknown descriptor in esds atom, desc={}", desc);
-                    scoped.ignore_bytes(desc_len as u64)?;
+                    scoped.ignore_bytes(desc_len as u64).await?;
                 }
             }
         }
 
         // Ignore remainder of the atom.
-        scoped.ignore()?;
+        scoped.ignore().await?;
 
         Ok(EsdsAtom { descriptor: descriptor.unwrap() })
     }
@@ -199,7 +199,7 @@ fn get_codec_id_from_object_type(obj_type: u8) -> Option<CodecId> {
 }
 
 pub trait ObjectDescriptor: Sized {
-    fn read<B: ReadBytes>(reader: &mut B, len: u32) -> Result<Self>;
+    async fn read<B: ReadBytes>(reader: &mut B, len: u32) -> Result<Self>;
 }
 
 /*
@@ -238,24 +238,24 @@ pub struct ESDescriptor {
 }
 
 impl ObjectDescriptor for ESDescriptor {
-    fn read<B: ReadBytes>(reader: &mut B, len: u32) -> Result<Self> {
-        let es_id = reader.read_be_u16()?;
-        let es_flags = reader.read_u8()?;
+    async fn read<B: ReadBytes>(reader: &mut B, len: u32) -> Result<Self> {
+        let es_id = reader.read_be_u16().await?;
+        let es_flags = reader.read_u8().await?;
 
         // Stream dependence flag.
         if es_flags & 0x80 != 0 {
-            let _depends_on_es_id = reader.read_u16()?;
+            let _depends_on_es_id = reader.read_u16().await?;
         }
 
         // URL flag.
         if es_flags & 0x40 != 0 {
-            let url_len = reader.read_u8()?;
-            reader.ignore_bytes(u64::from(url_len))?;
+            let url_len = reader.read_u8().await?;
+            reader.ignore_bytes(u64::from(url_len)).await?;
         }
 
         // OCR stream flag.
         if es_flags & 0x20 != 0 {
-            let _ocr_es_id = reader.read_u16()?;
+            let _ocr_es_id = reader.read_u16().await?;
         }
 
         let mut dec_config = None;
@@ -265,24 +265,24 @@ impl ObjectDescriptor for ESDescriptor {
 
         // Multiple descriptors follow, but only the decoder configuration descriptor is useful.
         while scoped.bytes_available() > MIN_DESCRIPTOR_SIZE {
-            let (desc, desc_len) = read_descriptor_header(&mut scoped)?;
+            let (desc, desc_len) = read_descriptor_header(&mut scoped).await?;
 
             match desc {
                 DECODER_CONFIG_DESCRIPTOR => {
-                    dec_config = Some(DecoderConfigDescriptor::read(&mut scoped, desc_len)?);
+                    dec_config = Some(DecoderConfigDescriptor::read(&mut scoped, desc_len).await?);
                 }
                 SL_CONFIG_DESCRIPTOR => {
-                    sl_config = Some(SLDescriptor::read(&mut scoped, desc_len)?);
+                    sl_config = Some(SLDescriptor::read(&mut scoped, desc_len).await?);
                 }
                 _ => {
                     debug!("skipping {} object in es descriptor", desc);
-                    scoped.ignore_bytes(u64::from(desc_len))?;
+                    scoped.ignore_bytes(u64::from(desc_len)).await?;
                 }
             }
         }
 
         // Consume remaining bytes.
-        scoped.ignore()?;
+        scoped.ignore().await?;
 
         // Decoder configuration descriptor is mandatory.
         if dec_config.is_none() {
@@ -320,11 +320,11 @@ pub struct DecoderConfigDescriptor {
 }
 
 impl ObjectDescriptor for DecoderConfigDescriptor {
-    fn read<B: ReadBytes>(reader: &mut B, len: u32) -> Result<Self> {
-        let object_type_indication = reader.read_u8()?;
+    async fn read<B: ReadBytes>(reader: &mut B, len: u32) -> Result<Self> {
+        let object_type_indication = reader.read_u8().await?;
 
         let (_stream_type, _upstream) = {
-            let val = reader.read_u8()?;
+            let val = reader.read_u8().await?;
 
             if val & 0x1 != 1 {
                 debug!("decoder config descriptor reserved bit is not 1");
@@ -333,9 +333,9 @@ impl ObjectDescriptor for DecoderConfigDescriptor {
             ((val & 0xfc) >> 2, (val & 0x2) >> 1)
         };
 
-        let _buffer_size = reader.read_be_u24()?;
-        let _max_bitrate = reader.read_be_u32()?;
-        let _avg_bitrate = reader.read_be_u32()?;
+        let _buffer_size = reader.read_be_u24().await?;
+        let _max_bitrate = reader.read_be_u32().await?;
+        let _avg_bitrate = reader.read_be_u32().await?;
 
         let mut dec_specific_config = None;
 
@@ -343,21 +343,22 @@ impl ObjectDescriptor for DecoderConfigDescriptor {
 
         // Multiple descriptors follow, but only the decoder specific info descriptor is useful.
         while scoped.bytes_available() > MIN_DESCRIPTOR_SIZE {
-            let (desc, desc_len) = read_descriptor_header(&mut scoped)?;
+            let (desc, desc_len) = read_descriptor_header(&mut scoped).await?;
 
             match desc {
                 DECODER_SPECIFIC_DESCRIPTOR => {
-                    dec_specific_config = Some(DecoderSpecificInfo::read(&mut scoped, desc_len)?);
+                    dec_specific_config =
+                        Some(DecoderSpecificInfo::read(&mut scoped, desc_len).await?);
                 }
                 _ => {
                     debug!("skipping {} object in decoder config descriptor", desc);
-                    scoped.ignore_bytes(u64::from(desc_len))?;
+                    scoped.ignore_bytes(u64::from(desc_len)).await?;
                 }
             }
         }
 
         // Consume remaining bytes.
-        scoped.ignore()?;
+        scoped.ignore().await?;
 
         Ok(DecoderConfigDescriptor {
             object_type_indication,
@@ -372,8 +373,8 @@ pub struct DecoderSpecificInfo {
 }
 
 impl ObjectDescriptor for DecoderSpecificInfo {
-    fn read<B: ReadBytes>(reader: &mut B, len: u32) -> Result<Self> {
-        Ok(DecoderSpecificInfo { extra_data: reader.read_boxed_slice_exact(len as usize)? })
+    async fn read<B: ReadBytes>(reader: &mut B, len: u32) -> Result<Self> {
+        Ok(DecoderSpecificInfo { extra_data: reader.read_boxed_slice_exact(len as usize).await? })
     }
 }
 
@@ -418,12 +419,12 @@ timeStampLength == 0,  for predefined == 0x2
 pub struct SLDescriptor;
 
 impl ObjectDescriptor for SLDescriptor {
-    fn read<B: ReadBytes>(reader: &mut B, _len: u32) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, _len: u32) -> Result<Self> {
         // const SLCONFIG_PREDEFINED_CUSTOM: u8 = 0x0;
         // const SLCONFIG_PREDEFINED_NULL: u8 = 0x1;
         const SLCONFIG_PREDEFINED_MP4: u8 = 0x2;
 
-        let predefined = reader.read_u8()?;
+        let predefined = reader.read_u8().await?;
 
         if predefined != SLCONFIG_PREDEFINED_MP4 {
             return unsupported_error("isomp4: sl descriptor predefined not mp4");

@@ -20,13 +20,13 @@ pub struct Dec3Atom {
 }
 
 impl Atom for Dec3Atom {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         // EAC3SpecificBox should have length
         let len = header
             .data_len()
             .ok_or(Error::DecodeError("isomp4 (dec3): expected atom size to be known"))?;
 
-        let extra_data = reader.read_boxed_slice_exact(len as usize)?;
+        let extra_data = reader.read_boxed_slice_exact(len as usize).await?;
 
         Ok(Dec3Atom { extra_data })
     }

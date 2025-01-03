@@ -35,17 +35,17 @@ impl MetaAtom {
 
 impl Atom for MetaAtom {
     #[allow(clippy::single_match)]
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (_, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (_, _) = header.read_extended_header(reader).await?;
 
         let mut iter = AtomIterator::new(reader, header);
 
         let mut metadata = None;
 
-        while let Some(header) = iter.next()? {
+        while let Some(header) = iter.next().await? {
             match header.atom_type {
                 AtomType::MetaList => {
-                    metadata = Some(iter.read_atom::<IlstAtom>()?.metadata);
+                    metadata = Some(iter.read_atom::<IlstAtom>().await?.metadata);
                 }
                 // TODO: Support country and language lists.
                 _ => (),

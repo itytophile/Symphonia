@@ -43,38 +43,38 @@ pub struct MdhdAtom {
 }
 
 impl Atom for MdhdAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (version, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (version, _) = header.read_extended_header(reader).await?;
 
         let mut mdhd =
             MdhdAtom { ctime: 0, mtime: 0, timescale: 0, duration: 0, language: String::new() };
 
         match version {
             0 => {
-                mdhd.ctime = u64::from(reader.read_be_u32()?);
-                mdhd.mtime = u64::from(reader.read_be_u32()?);
-                mdhd.timescale = reader.read_be_u32()?;
+                mdhd.ctime = u64::from(reader.read_be_u32().await?);
+                mdhd.mtime = u64::from(reader.read_be_u32().await?);
+                mdhd.timescale = reader.read_be_u32().await?;
                 // 0xffff_ffff is a special case.
-                mdhd.duration = match reader.read_be_u32()? {
+                mdhd.duration = match reader.read_be_u32().await? {
                     u32::MAX => u64::MAX,
                     duration => u64::from(duration),
                 };
             }
             1 => {
-                mdhd.ctime = reader.read_be_u64()?;
-                mdhd.mtime = reader.read_be_u64()?;
-                mdhd.timescale = reader.read_be_u32()?;
-                mdhd.duration = reader.read_be_u64()?;
+                mdhd.ctime = reader.read_be_u64().await?;
+                mdhd.mtime = reader.read_be_u64().await?;
+                mdhd.timescale = reader.read_be_u32().await?;
+                mdhd.duration = reader.read_be_u64().await?;
             }
             _ => {
                 return decode_error("isomp4: invalid mdhd version");
             }
         }
 
-        mdhd.language = parse_language(reader.read_be_u16()?);
+        mdhd.language = parse_language(reader.read_be_u16().await?);
 
         // Quality
-        let _ = reader.read_be_u16()?;
+        let _ = reader.read_be_u16().await?;
 
         Ok(mdhd)
     }

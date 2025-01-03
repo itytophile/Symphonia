@@ -18,16 +18,16 @@ pub struct Co64Atom {
 }
 
 impl Atom for Co64Atom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (_, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (_, _) = header.read_extended_header(reader).await?;
 
-        let entry_count = reader.read_be_u32()?;
+        let entry_count = reader.read_be_u32().await?;
 
         // TODO: Apply a limit.
         let mut chunk_offsets = Vec::with_capacity(entry_count as usize);
 
         for _ in 0..entry_count {
-            chunk_offsets.push(reader.read_be_u64()?);
+            chunk_offsets.push(reader.read_be_u64().await?);
         }
 
         Ok(Co64Atom { chunk_offsets })

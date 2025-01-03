@@ -75,10 +75,10 @@ impl SttsAtom {
 }
 
 impl Atom for SttsAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (_, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (_, _) = header.read_extended_header(reader).await?;
 
-        let entry_count = reader.read_be_u32()?;
+        let entry_count = reader.read_be_u32().await?;
 
         let mut total_duration = 0;
 
@@ -86,8 +86,8 @@ impl Atom for SttsAtom {
         let mut entries = Vec::with_capacity(entry_count as usize);
 
         for _ in 0..entry_count {
-            let sample_count = reader.read_be_u32()?;
-            let sample_delta = reader.read_be_u32()?;
+            let sample_count = reader.read_be_u32().await?;
+            let sample_delta = reader.read_be_u32().await?;
 
             total_duration += u64::from(sample_count) * u64::from(sample_delta);
 

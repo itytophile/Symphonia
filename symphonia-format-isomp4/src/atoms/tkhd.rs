@@ -37,8 +37,8 @@ pub struct TkhdAtom {
 }
 
 impl Atom for TkhdAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (version, flags) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (version, flags) = header.read_extended_header(reader).await?;
 
         let mut tkhd = TkhdAtom {
             flags,
@@ -54,28 +54,28 @@ impl Atom for TkhdAtom {
         // Version 0 uses 32-bit time values, verion 1 used 64-bit values.
         match version {
             0 => {
-                tkhd.ctime = u64::from(reader.read_be_u32()?);
-                tkhd.mtime = u64::from(reader.read_be_u32()?);
-                tkhd.id = reader.read_be_u32()?;
-                let _ = reader.read_be_u32()?; // Reserved
-                tkhd.duration = u64::from(reader.read_be_u32()?);
+                tkhd.ctime = u64::from(reader.read_be_u32().await?);
+                tkhd.mtime = u64::from(reader.read_be_u32().await?);
+                tkhd.id = reader.read_be_u32().await?;
+                let _ = reader.read_be_u32().await?; // Reserved
+                tkhd.duration = u64::from(reader.read_be_u32().await?);
             }
             1 => {
-                tkhd.ctime = reader.read_be_u64()?;
-                tkhd.mtime = reader.read_be_u64()?;
-                tkhd.id = reader.read_be_u32()?;
-                let _ = reader.read_be_u32()?; // Reserved
-                tkhd.duration = reader.read_be_u64()?;
+                tkhd.ctime = reader.read_be_u64().await?;
+                tkhd.mtime = reader.read_be_u64().await?;
+                tkhd.id = reader.read_be_u32().await?;
+                let _ = reader.read_be_u32().await?; // Reserved
+                tkhd.duration = reader.read_be_u64().await?;
             }
             _ => return decode_error("isomp4: invalid tkhd version"),
         }
 
         // Reserved
-        let _ = reader.read_be_u64()?;
+        let _ = reader.read_be_u64().await?;
 
-        tkhd.layer = reader.read_be_u16()?;
-        tkhd.alternate_group = reader.read_be_u16()?;
-        tkhd.volume = FpU8::parse_raw(reader.read_be_u16()?);
+        tkhd.layer = reader.read_be_u16().await?;
+        tkhd.alternate_group = reader.read_be_u16().await?;
+        tkhd.volume = FpU8::parse_raw(reader.read_be_u16().await?);
 
         // The remainder of the header is only useful for video tracks.
 

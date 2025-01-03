@@ -28,7 +28,7 @@ pub struct AvcCAtom {
 }
 
 impl Atom for AvcCAtom {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         // The AVCConfiguration atom payload is a single AVCDecoderConfigurationRecord. This record
         // forms the defacto codec extra data. It should not exceed 1kb
         let len = match header.data_len() {
@@ -39,7 +39,7 @@ impl Atom for AvcCAtom {
 
         let extra_data = VideoExtraData {
             id: VIDEO_EXTRA_DATA_ID_AVC_DECODER_CONFIG,
-            data: reader.read_boxed_slice_exact(len)?,
+            data: reader.read_boxed_slice_exact(len).await?,
         };
 
         let avc_config = AVCDecoderConfigurationRecord::read(&extra_data.data)?;

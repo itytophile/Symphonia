@@ -15,7 +15,7 @@ use crate::atoms::{Atom, AtomHeader};
 pub struct StssAtom {}
 
 impl Atom for StssAtom {
-    fn read<B: ReadBytes>(_reader: &mut B, _header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(_reader: &mut B, _header: AtomHeader) -> Result<Self> {
         todo!()
     }
 }

@@ -18,16 +18,16 @@ pub struct StcoAtom {
 }
 
 impl Atom for StcoAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (_, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (_, _) = header.read_extended_header(reader).await?;
 
-        let entry_count = reader.read_be_u32()?;
+        let entry_count = reader.read_be_u32().await?;
 
         // TODO: Apply a limit.
         let mut chunk_offsets = Vec::with_capacity(entry_count as usize);
 
         for _ in 0..entry_count {
-            chunk_offsets.push(reader.read_be_u32()?);
+            chunk_offsets.push(reader.read_be_u32().await?);
         }
 
         Ok(StcoAtom { chunk_offsets })

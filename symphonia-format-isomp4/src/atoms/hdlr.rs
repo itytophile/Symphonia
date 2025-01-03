@@ -41,13 +41,13 @@ pub struct HdlrAtom {
 }
 
 impl Atom for HdlrAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (_, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (_, _) = header.read_extended_header(reader).await?;
 
         // Always 0 for MP4, but for Quicktime this contains the component type.
-        let _ = reader.read_quad_bytes()?;
+        let _ = reader.read_quad_bytes().await?;
 
-        let handler_type = match &reader.read_quad_bytes()? {
+        let handler_type = match &reader.read_quad_bytes().await? {
             b"vide" => HandlerType::Video,
             b"soun" => HandlerType::Sound,
             b"meta" => HandlerType::Metadata,
@@ -61,14 +61,14 @@ impl Atom for HdlrAtom {
 
         // These bytes are reserved for MP4, but for QuickTime they contain the component
         // manufacturer, flags, and flags mask.
-        reader.ignore_bytes(4 * 3)?;
+        reader.ignore_bytes(4 * 3).await?;
 
         // Human readable UTF-8 string of the track type.
         let name = {
             let size = header
                 .data_unread_at(reader.pos())
                 .ok_or(Error::DecodeError("isomp4 (hdlr): expected atom size to be known"))?;
-            let buf = reader.read_boxed_slice_exact(size as usize)?;
+            let buf = reader.read_boxed_slice_exact(size as usize).await?;
             String::from_utf8_lossy(&buf).to_string()
         };
 

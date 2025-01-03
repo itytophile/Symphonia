@@ -29,29 +29,29 @@ pub struct ElstAtom {
 }
 
 impl Atom for ElstAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (version, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (version, _) = header.read_extended_header(reader).await?;
 
         // TODO: Apply a limit.
-        let entry_count = reader.read_be_u32()?;
+        let entry_count = reader.read_be_u32().await?;
 
         let mut entries = Vec::new();
 
         for _ in 0..entry_count {
             let (segment_duration, media_time) = match version {
                 0 => (
-                    u64::from(reader.read_be_u32()?),
-                    i64::from(bits::sign_extend_leq32_to_i32(reader.read_be_u32()?, 32)),
+                    u64::from(reader.read_be_u32().await?),
+                    i64::from(bits::sign_extend_leq32_to_i32(reader.read_be_u32().await?, 32)),
                 ),
                 1 => (
-                    reader.read_be_u64()?,
-                    bits::sign_extend_leq64_to_i64(reader.read_be_u64()?, 64),
+                    reader.read_be_u64().await?,
+                    bits::sign_extend_leq64_to_i64(reader.read_be_u64().await?, 64),
                 ),
                 _ => return decode_error("isomp4: invalid tkhd version"),
             };
 
-            let media_rate_int = bits::sign_extend_leq16_to_i16(reader.read_be_u16()?, 16);
-            let media_rate_frac = bits::sign_extend_leq16_to_i16(reader.read_be_u16()?, 16);
+            let media_rate_int = bits::sign_extend_leq16_to_i16(reader.read_be_u16().await?, 16);
+            let media_rate_frac = bits::sign_extend_leq16_to_i16(reader.read_be_u16().await?, 16);
 
             entries.push(ElstEntry {
                 segment_duration,

@@ -183,7 +183,7 @@ pub mod default {
         #[cfg(feature = "caf")]
         pub use symphonia_format_caf::CafReader;
         #[cfg(feature = "isomp4")]
-        pub use symphonia_format_isomp4::IsoMp4Reader;
+        pub use symphonia_format_isomp4::AsyncIsoMp4Reader;
         #[cfg(feature = "mkv")]
         pub use symphonia_format_mkv::MkvReader;
         #[cfg(feature = "ogg")]
@@ -297,7 +297,7 @@ pub mod default {
         probe.register_format::<formats::FlacReader<'_>>();
 
         #[cfg(feature = "isomp4")]
-        probe.register_format::<formats::IsoMp4Reader<'_>>();
+        probe.register_format::<formats::AsyncIsoMp4Reader<'_>>();
 
         #[cfg(any(feature = "mp1", feature = "mp2", feature = "mp3"))]
         probe.register_format::<formats::MpaReader<'_>>();

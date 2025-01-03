@@ -19,15 +19,15 @@ pub struct EdtsAtom {
 
 impl Atom for EdtsAtom {
     #[allow(clippy::single_match)]
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         let mut iter = AtomIterator::new(reader, header);
 
         let mut elst = None;
 
-        while let Some(header) = iter.next()? {
+        while let Some(header) = iter.next().await? {
             match header.atom_type {
                 AtomType::EditList => {
-                    elst = Some(iter.read_atom::<ElstAtom>()?);
+                    elst = Some(iter.read_atom::<ElstAtom>().await?);
                 }
                 _ => (),
             }

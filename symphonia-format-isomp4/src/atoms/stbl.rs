@@ -26,7 +26,7 @@ pub struct StblAtom {
 }
 
 impl Atom for StblAtom {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         let mut iter = AtomIterator::new(reader, header);
 
         let mut stsd = None;
@@ -36,13 +36,13 @@ impl Atom for StblAtom {
         let mut stco = None;
         let mut co64 = None;
 
-        while let Some(header) = iter.next()? {
+        while let Some(header) = iter.next().await? {
             match header.atom_type {
                 AtomType::SampleDescription => {
-                    stsd = Some(iter.read_atom::<StsdAtom>()?);
+                    stsd = Some(iter.read_atom::<StsdAtom>().await?);
                 }
                 AtomType::TimeToSample => {
-                    stts = Some(iter.read_atom::<SttsAtom>()?);
+                    stts = Some(iter.read_atom::<SttsAtom>().await?);
                 }
                 AtomType::CompositionTimeToSample => {
                     // Composition time to sample atom is only required for video.
@@ -53,16 +53,16 @@ impl Atom for StblAtom {
                     warn!("ignoring stss atom.");
                 }
                 AtomType::SampleToChunk => {
-                    stsc = Some(iter.read_atom::<StscAtom>()?);
+                    stsc = Some(iter.read_atom::<StscAtom>().await?);
                 }
                 AtomType::SampleSize => {
-                    stsz = Some(iter.read_atom::<StszAtom>()?);
+                    stsz = Some(iter.read_atom::<StszAtom>().await?);
                 }
                 AtomType::ChunkOffset => {
-                    stco = Some(iter.read_atom::<StcoAtom>()?);
+                    stco = Some(iter.read_atom::<StcoAtom>().await?);
                 }
                 AtomType::ChunkOffset64 => {
-                    co64 = Some(iter.read_atom::<Co64Atom>()?);
+                    co64 = Some(iter.read_atom::<Co64Atom>().await?);
                 }
                 _ => (),
             }

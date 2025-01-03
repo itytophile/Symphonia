@@ -20,14 +20,14 @@ pub struct SmhdAtom {
 }
 
 impl Atom for SmhdAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (_, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (_, _) = header.read_extended_header(reader).await?;
 
         // Stereo balance
-        let balance = FpI8::parse_raw(reader.read_be_u16()? as i16);
+        let balance = FpI8::parse_raw(reader.read_be_u16().await? as i16);
 
         // Reserved.
-        let _ = reader.read_be_u16()?;
+        let _ = reader.read_be_u16().await?;
 
         Ok(SmhdAtom { balance })
     }

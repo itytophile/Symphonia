@@ -23,7 +23,7 @@ pub struct TrafAtom {
 }
 
 impl Atom for TrafAtom {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         let mut tfhd = None;
         let mut truns = Vec::new();
 
@@ -31,13 +31,13 @@ impl Atom for TrafAtom {
 
         let mut total_sample_count = 0;
 
-        while let Some(header) = iter.next()? {
+        while let Some(header) = iter.next().await? {
             match header.atom_type {
                 AtomType::TrackFragmentHeader => {
-                    tfhd = Some(iter.read_atom::<TfhdAtom>()?);
+                    tfhd = Some(iter.read_atom::<TfhdAtom>().await?);
                 }
                 AtomType::TrackFragmentRun => {
-                    let trun = iter.read_atom::<TrunAtom>()?;
+                    let trun = iter.read_atom::<TrunAtom>().await?;
 
                     // Increment the total sample count.
                     total_sample_count += trun.sample_count;

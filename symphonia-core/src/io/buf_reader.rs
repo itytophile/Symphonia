@@ -285,6 +285,13 @@ impl<'a> BufReader<'a> {
         self.read_buf_exact(&mut buf)?;
         Ok(f64::from_be_bytes(buf))
     }
+
+    #[inline(always)]
+    pub fn read_be_u64(&mut self) -> io::Result<u64> {
+        let mut buf = [0u8; std::mem::size_of::<u64>()];
+        self.read_buf_exact(&mut buf)?;
+        Ok(u64::from_be_bytes(buf))
+    }
 }
 
 impl ReadBytes for BufReader<'_> {

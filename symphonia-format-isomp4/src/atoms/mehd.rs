@@ -19,12 +19,12 @@ pub struct MehdAtom {
 }
 
 impl Atom for MehdAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (version, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (version, _) = header.read_extended_header(reader).await?;
 
         let fragment_duration = match version {
-            0 => u64::from(reader.read_be_u32()?),
-            1 => reader.read_be_u64()?,
+            0 => u64::from(reader.read_be_u32().await?),
+            1 => reader.read_be_u64().await?,
             _ => {
                 return decode_error("isomp4: invalid mehd version");
             }

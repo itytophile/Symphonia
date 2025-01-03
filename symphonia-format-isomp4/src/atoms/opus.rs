@@ -21,7 +21,7 @@ pub struct OpusAtom {
 }
 
 impl Atom for OpusAtom {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         const OPUS_MAGIC: &[u8] = b"OpusHead";
         const OPUS_MAGIC_LEN: usize = OPUS_MAGIC.len();
 
@@ -53,7 +53,7 @@ impl Atom for OpusAtom {
         extra_data[..OPUS_MAGIC_LEN].copy_from_slice(OPUS_MAGIC);
 
         // Read the extra data from the atom.
-        reader.read_buf_exact(&mut extra_data[OPUS_MAGIC_LEN..])?;
+        reader.read_buf_exact(&mut extra_data[OPUS_MAGIC_LEN..]).await?;
 
         // Verify the version number is 0.
         if extra_data[OPUS_EXTRADATA_VERSION_OFFSET] != 0 {

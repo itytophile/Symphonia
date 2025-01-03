@@ -42,7 +42,7 @@ impl MoovAtom {
 }
 
 impl Atom for MoovAtom {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         let mut iter = AtomIterator::new(reader, header);
 
         let mut mvhd = None;
@@ -50,20 +50,20 @@ impl Atom for MoovAtom {
         let mut mvex = None;
         let mut udta = None;
 
-        while let Some(header) = iter.next()? {
+        while let Some(header) = iter.next().await? {
             match header.atom_type {
                 AtomType::MovieHeader => {
-                    mvhd = Some(iter.read_atom::<MvhdAtom>()?);
+                    mvhd = Some(iter.read_atom::<MvhdAtom>().await?);
                 }
                 AtomType::Track => {
-                    let trak = iter.read_atom::<TrakAtom>()?;
+                    let trak = iter.read_atom::<TrakAtom>().await?;
                     traks.push(trak);
                 }
                 AtomType::MovieExtends => {
-                    mvex = Some(iter.read_atom::<MvexAtom>()?);
+                    mvex = Some(iter.read_atom::<MvexAtom>().await?);
                 }
                 AtomType::UserData => {
-                    udta = Some(iter.read_atom::<UdtaAtom>()?);
+                    udta = Some(iter.read_atom::<UdtaAtom>().await?);
                 }
                 _ => (),
             }

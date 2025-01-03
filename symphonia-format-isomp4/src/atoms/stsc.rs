@@ -56,20 +56,20 @@ impl StscAtom {
 }
 
 impl Atom for StscAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (_, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (_, _) = header.read_extended_header(reader).await?;
 
-        let entry_count = reader.read_be_u32()?;
+        let entry_count = reader.read_be_u32().await?;
 
         // TODO: Apply a limit.
         let mut entries = Vec::with_capacity(entry_count as usize);
 
         for _ in 0..entry_count {
             entries.push(StscEntry {
-                first_chunk: reader.read_be_u32()? - 1,
+                first_chunk: reader.read_be_u32().await? - 1,
                 first_sample: 0,
-                samples_per_chunk: reader.read_be_u32()?,
-                sample_desc_index: reader.read_be_u32()?,
+                samples_per_chunk: reader.read_be_u32().await?,
+                sample_desc_index: reader.read_be_u32().await?,
             });
         }
 

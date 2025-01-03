@@ -21,19 +21,19 @@ pub struct MinfAtom {
 }
 
 impl Atom for MinfAtom {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         let mut iter = AtomIterator::new(reader, header);
 
         let mut smhd = None;
         let mut stbl = None;
 
-        while let Some(header) = iter.next()? {
+        while let Some(header) = iter.next().await? {
             match header.atom_type {
                 AtomType::SoundMediaHeader => {
-                    smhd = Some(iter.read_atom::<SmhdAtom>()?);
+                    smhd = Some(iter.read_atom::<SmhdAtom>().await?);
                 }
                 AtomType::SampleTable => {
-                    stbl = Some(iter.read_atom::<StblAtom>()?);
+                    stbl = Some(iter.read_atom::<StblAtom>().await?);
                 }
                 _ => (),
             }

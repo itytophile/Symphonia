@@ -28,34 +28,34 @@ pub struct TfhdAtom {
 }
 
 impl Atom for TfhdAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (_, flags) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (_, flags) = header.read_extended_header(reader).await?;
 
-        let track_id = reader.read_be_u32()?;
+        let track_id = reader.read_be_u32().await?;
 
         let base_data_offset = match flags & 0x1 {
             0 => None,
-            _ => Some(reader.read_be_u64()?),
+            _ => Some(reader.read_be_u64().await?),
         };
 
         let sample_desc_idx = match flags & 0x2 {
             0 => None,
-            _ => Some(reader.read_be_u32()?),
+            _ => Some(reader.read_be_u32().await?),
         };
 
         let default_sample_duration = match flags & 0x8 {
             0 => None,
-            _ => Some(reader.read_be_u32()?),
+            _ => Some(reader.read_be_u32().await?),
         };
 
         let default_sample_size = match flags & 0x10 {
             0 => None,
-            _ => Some(reader.read_be_u32()?),
+            _ => Some(reader.read_be_u32().await?),
         };
 
         let default_sample_flags = match flags & 0x20 {
             0 => None,
-            _ => Some(reader.read_be_u32()?),
+            _ => Some(reader.read_be_u32().await?),
         };
 
         let duration_is_empty = (flags & 0x1_0000) != 0;

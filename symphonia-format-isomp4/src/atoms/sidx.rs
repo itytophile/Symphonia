@@ -39,11 +39,11 @@ pub struct SidxAtom {
 }
 
 impl Atom for SidxAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (version, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (version, _) = header.read_extended_header(reader).await?;
 
-        let reference_id = reader.read_be_u32()?;
-        let timescale = reader.read_be_u32()?;
+        let reference_id = reader.read_be_u32().await?;
+        let timescale = reader.read_be_u32().await?;
 
         // The anchor point for segment offsets is the first byte after this atom.
         let anchor = header
@@ -52,21 +52,24 @@ impl Atom for SidxAtom {
             .ok_or(Error::DecodeError("isomp4 (sidx): expected atom size to be known"))?;
 
         let (earliest_pts, first_offset) = match version {
-            0 => (u64::from(reader.read_be_u32()?), anchor + u64::from(reader.read_be_u32()?)),
-            1 => (reader.read_be_u64()?, anchor + reader.read_be_u64()?),
+            0 => (
+                u64::from(reader.read_be_u32().await?),
+                anchor + u64::from(reader.read_be_u32().await?),
+            ),
+            1 => (reader.read_be_u64().await?, anchor + reader.read_be_u64().await?),
             _ => {
                 return decode_error("isomp4: invalid sidx version");
             }
         };
 
-        let _reserved = reader.read_be_u16()?;
-        let reference_count = reader.read_be_u16()?;
+        let _reserved = reader.read_be_u16().await?;
+        let reference_count = reader.read_be_u16().await?;
 
         let mut references = Vec::new();
 
         for _ in 0..reference_count {
-            let reference = reader.read_be_u32()?;
-            let subsegment_duration = reader.read_be_u32()?;
+            let reference = reader.read_be_u32().await?;
+            let subsegment_duration = reader.read_be_u32().await?;
 
             let reference_type = match (reference & 0x8000_0000) != 0 {
                 false => ReferenceType::Media,
@@ -76,7 +79,7 @@ impl Atom for SidxAtom {
             let reference_size = reference & !0x8000_0000;
 
             // Ignore SAP
-            let _ = reader.read_be_u32()?;
+            let _ = reader.read_be_u32().await?;
 
             references.push(SidxReference { reference_type, reference_size, subsegment_duration });
         }

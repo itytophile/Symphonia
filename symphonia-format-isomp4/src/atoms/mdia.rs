@@ -19,23 +19,23 @@ pub struct MdiaAtom {
 }
 
 impl Atom for MdiaAtom {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         let mut iter = AtomIterator::new(reader, header);
 
         let mut mdhd = None;
         let mut hdlr = None;
         let mut minf = None;
 
-        while let Some(header) = iter.next()? {
+        while let Some(header) = iter.next().await? {
             match header.atom_type {
                 AtomType::MediaHeader => {
-                    mdhd = Some(iter.read_atom::<MdhdAtom>()?);
+                    mdhd = Some(iter.read_atom::<MdhdAtom>().await?);
                 }
                 AtomType::Handler => {
-                    hdlr = Some(iter.read_atom::<HdlrAtom>()?);
+                    hdlr = Some(iter.read_atom::<HdlrAtom>().await?);
                 }
                 AtomType::MediaInfo => {
-                    minf = Some(iter.read_atom::<MinfAtom>()?);
+                    minf = Some(iter.read_atom::<MinfAtom>().await?);
                 }
                 _ => (),
             }

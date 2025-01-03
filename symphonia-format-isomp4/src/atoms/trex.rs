@@ -27,15 +27,15 @@ pub struct TrexAtom {
 }
 
 impl Atom for TrexAtom {
-    fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
-        let (_, _) = header.read_extended_header(reader)?;
+    async fn read<B: ReadBytes>(reader: &mut B, mut header: AtomHeader) -> Result<Self> {
+        let (_, _) = header.read_extended_header(reader).await?;
 
         Ok(TrexAtom {
-            track_id: reader.read_be_u32()?,
-            default_sample_desc_idx: reader.read_be_u32()?,
-            default_sample_duration: reader.read_be_u32()?,
-            default_sample_size: reader.read_be_u32()?,
-            default_sample_flags: reader.read_be_u32()?,
+            track_id: reader.read_be_u32().await?,
+            default_sample_desc_idx: reader.read_be_u32().await?,
+            default_sample_duration: reader.read_be_u32().await?,
+            default_sample_size: reader.read_be_u32().await?,
+            default_sample_flags: reader.read_be_u32().await?,
         })
     }
 }

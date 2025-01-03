@@ -18,14 +18,14 @@ pub struct WaveAtom {
 }
 
 impl Atom for WaveAtom {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self> {
         let mut iter = AtomIterator::new(reader, header);
 
         let mut esds = None;
 
-        while let Some(header) = iter.next()? {
+        while let Some(header) = iter.next().await? {
             if header.atom_type == AtomType::Esds {
-                esds = Some(iter.read_atom::<EsdsAtom>()?);
+                esds = Some(iter.read_atom::<EsdsAtom>().await?);
             }
         }
 
