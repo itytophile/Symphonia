@@ -893,20 +893,20 @@ pub trait ReadBitsLtr: private::FetchBitsLtr {
 ///
 /// Stated another way, if N-bits are read from a `BitReaderLtr` then bit 0, the first bit read,
 /// is the most-significant bit, and bit N-1, the last bit read, is the least-significant.
-pub struct BitStreamLtr<'a> {
-    reader: &'a mut BufReader<'a>,
+pub struct BitStreamLtr<'a, 'b> {
+    reader: &'a mut BufReader<'b>,
     bits: u64,
     n_bits_left: u32,
 }
 
-impl<'a> BitStreamLtr<'a> {
+impl<'a, 'b> BitStreamLtr<'a, 'b> {
     /// Instantiate a new `BitStreamLtr` with the given source.
-    pub fn new(reader: &'a mut BufReader<'a>) -> Self {
+    pub fn new(reader: &'a mut BufReader<'b>) -> Self {
         BitStreamLtr { reader, bits: 0, n_bits_left: 0 }
     }
 }
 
-impl private::FetchBitsLtr for BitStreamLtr<'_> {
+impl private::FetchBitsLtr for BitStreamLtr<'_, '_> {
     #[inline(always)]
     fn fetch_bits(&mut self) -> io::Result<()> {
         self.bits = u64::from(self.reader.read_byte()?) << 56;
@@ -936,7 +936,7 @@ impl private::FetchBitsLtr for BitStreamLtr<'_> {
     }
 }
 
-impl ReadBitsLtr for BitStreamLtr<'_> {}
+impl ReadBitsLtr for BitStreamLtr<'_, '_> {}
 
 /// `BitReaderLtr` reads bits from most-significant to least-significant from any `&[u8]`.
 ///

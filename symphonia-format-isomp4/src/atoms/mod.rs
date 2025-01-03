@@ -448,11 +448,11 @@ impl AtomHeader {
     const LARGE_HEADER_SIZE: u8 = AtomHeader::HEADER_SIZE + 8;
 
     /// Reads an atom header from the provided `ByteStream`.
-    pub fn read<B: ReadBytes>(reader: &mut B) -> Result<AtomHeader> {
+    pub async fn read<B: ReadBytes>(reader: &mut B) -> Result<AtomHeader> {
         let atom_pos = reader.pos();
 
-        let atom_len = u64::from(reader.read_be_u32()?);
-        let atom_type = AtomType::from(reader.read_quad_bytes()?);
+        let atom_len = u64::from(reader.read_be_u32().await?);
+        let atom_type = AtomType::from(reader.read_quad_bytes().await?);
 
         let (header_len, atom_len) = match atom_len {
             0 => {
@@ -461,7 +461,7 @@ impl AtomHeader {
             }
             1 => {
                 // An atom size of 1 indicates a 64-bit atom size should be read.
-                let large_atom_len = reader.read_be_u64()?;
+                let large_atom_len = reader.read_be_u64().await?;
 
                 // The atom size should be atleast the size of the header.
                 if large_atom_len < u64::from(AtomHeader::LARGE_HEADER_SIZE) {
@@ -539,7 +539,7 @@ impl AtomHeader {
     ///
     /// On success, consumes 16 bytes from the payload size.
     #[allow(dead_code)]
-    pub fn read_uuid<B: ReadBytes>(&mut self, reader: &mut B) -> Result<[u8; 16]> {
+    pub async fn read_uuid<B: ReadBytes>(&mut self, reader: &mut B) -> Result<[u8; 16]> {
         match self.atom_type {
             AtomType::Uuid => {
                 // If the payload size is known, then check that 16 bytes of the payload is
@@ -552,7 +552,7 @@ impl AtomHeader {
 
                 // Read a 16-byte UUID.
                 let mut uuid = [0; 16];
-                reader.read_buf_exact(&mut uuid)?;
+                reader.read_buf_exact(&mut uuid).await?;
                 // Adjust header size.
                 self.header_len += 16;
 
@@ -565,7 +565,10 @@ impl AtomHeader {
     /// Read the version and flags extended atom header fields.
     ///
     /// On success, consumes 4 bytes from the payload size.
-    pub fn read_extended_header<B: ReadBytes>(&mut self, reader: &mut B) -> Result<(u8, u32)> {
+    pub async fn read_extended_header<B: ReadBytes>(
+        &mut self,
+        reader: &mut B,
+    ) -> Result<(u8, u32)> {
         // If the payload size is known, then check that 4 bytes of the payload is available to be
         // read as the extended header.
         if let Some(data_len) = self.data_len() {
@@ -575,7 +578,7 @@ impl AtomHeader {
         }
 
         // Read the extended header fields.
-        let header = (reader.read_u8()?, reader.read_be_u24()?);
+        let header = (reader.read_u8().await?, reader.read_be_u24().await?);
         // Adjust the header size.
         self.header_len += 4;
 
@@ -584,7 +587,7 @@ impl AtomHeader {
 }
 
 pub trait Atom: Sized {
-    fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self>;
+    async fn read<B: ReadBytes>(reader: &mut B, header: AtomHeader) -> Result<Self>;
 }
 
 pub struct AtomIterator<B: ReadBytes> {
@@ -622,12 +625,12 @@ impl<B: ReadBytes> AtomIterator<B> {
         &mut self.reader
     }
 
-    pub fn next(&mut self) -> Result<Option<AtomHeader>> {
+    pub async fn next(&mut self) -> Result<Option<AtomHeader>> {
         // Ignore any remaining data in the current atom that was not read.
         let cur_pos = self.reader.pos();
 
         if cur_pos < self.next_atom_pos {
-            self.reader.ignore_bytes(self.next_atom_pos - cur_pos)?;
+            self.reader.ignore_bytes(self.next_atom_pos - cur_pos).await?;
         }
         else if cur_pos > self.next_atom_pos {
             // This is very bad, either the atom's length was incorrect or the demuxer erroroneously
@@ -643,7 +646,7 @@ impl<B: ReadBytes> AtomIterator<B> {
         }
 
         // Read the next atom header.
-        let atom = AtomHeader::read(&mut self.reader)?;
+        let atom = AtomHeader::read(&mut self.reader).await?;
 
         // Calculate the start position for the next atom (the exclusive end of the current atom).
         self.next_atom_pos = match atom.atom_len {
@@ -662,21 +665,21 @@ impl<B: ReadBytes> AtomIterator<B> {
         Ok(self.cur_atom)
     }
 
-    pub fn next_no_consume(&mut self) -> Result<Option<AtomHeader>> {
+    pub async fn next_no_consume(&mut self) -> Result<Option<AtomHeader>> {
         if self.cur_atom.is_some() {
             Ok(self.cur_atom)
         }
         else {
-            self.next()
+            self.next().await
         }
     }
 
-    pub fn read_atom<A: Atom>(&mut self) -> Result<A> {
+    pub async fn read_atom<A: Atom>(&mut self) -> Result<A> {
         // It is not possible to read the current atom more than once because ByteStream is not
         // seekable. Therefore, raise an assert if read_atom is called more than once between calls
         // to next, or after next returns None.
         assert!(self.cur_atom.is_some());
-        A::read(&mut self.reader, self.cur_atom.take().unwrap())
+        A::read(&mut self.reader, self.cur_atom.take().unwrap()).await
     }
 
     pub fn consume_atom(&mut self) {

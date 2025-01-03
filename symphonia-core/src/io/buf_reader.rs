@@ -204,6 +204,25 @@ impl<'a> BufReader<'a> {
     }
 
     #[inline(always)]
+    pub fn read_u24(&mut self) -> io::Result<u32> {
+        let mut buf = [0u8; std::mem::size_of::<u32>()];
+        buf[0..3].clone_from_slice(&self.read_triple_bytes()?);
+        Ok(u32::from_le_bytes(buf))
+    }
+
+    #[inline(always)]
+    pub fn read_be_u24(&mut self) -> io::Result<u32> {
+        let mut buf = [0u8; std::mem::size_of::<u32>()];
+        buf[0..3].clone_from_slice(&self.read_triple_bytes()?);
+        Ok(u32::from_be_bytes(buf) >> 8)
+    }
+
+    #[inline(always)]
+    pub fn read_i24(&mut self) -> io::Result<i32> {
+        Ok(((self.read_u24()? << 8) as i32) >> 8)
+    }
+
+    #[inline(always)]
     pub fn read_u32(&mut self) -> io::Result<u32> {
         Ok(u32::from_le_bytes(self.read_quad_bytes()?))
     }
@@ -216,6 +235,11 @@ impl<'a> BufReader<'a> {
     #[inline(always)]
     pub fn read_i32(&mut self) -> io::Result<i32> {
         Ok(i32::from_le_bytes(self.read_quad_bytes()?))
+    }
+
+    #[inline(always)]
+    pub fn read_be_i32(&mut self) -> io::Result<i32> {
+        Ok(i32::from_be_bytes(self.read_quad_bytes()?))
     }
 }
 

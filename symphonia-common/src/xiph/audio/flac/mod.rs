@@ -97,7 +97,7 @@ pub struct StreamInfo {
 
 impl StreamInfo {
     /// Read a stream information block.
-    pub fn read<B: ReadBytes>(reader: &mut B) -> Result<StreamInfo> {
+    pub fn read(reader: &mut BufReader<'_>) -> Result<StreamInfo> {
         let mut info = StreamInfo {
             block_len_min: 0,
             block_len_max: 0,
@@ -201,8 +201,8 @@ pub struct MetadataBlockHeader {
 
 impl MetadataBlockHeader {
     /// Read a metadata block header.
-    pub fn read<B: ReadBytes>(reader: &mut B) -> Result<MetadataBlockHeader> {
-        let header_enc = reader.read_u8()?;
+    pub async fn read<B: ReadBytes>(reader: &mut B) -> Result<MetadataBlockHeader> {
+        let header_enc = reader.read_u8().await?;
 
         // First bit of the header indicates if this is the last metadata block.
         let is_last = (header_enc & 0x80) == 0x80;
@@ -221,7 +221,7 @@ impl MetadataBlockHeader {
             _ => MetadataBlockType::Unknown(block_type_id),
         };
 
-        let block_len = reader.read_be_u24()?;
+        let block_len = reader.read_be_u24().await?;
 
         Ok(MetadataBlockHeader { is_last, block_type, block_len })
     }
