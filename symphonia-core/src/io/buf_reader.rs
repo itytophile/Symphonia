@@ -241,6 +241,50 @@ impl<'a> BufReader<'a> {
     pub fn read_be_i32(&mut self) -> io::Result<i32> {
         Ok(i32::from_be_bytes(self.read_quad_bytes()?))
     }
+
+    #[inline(always)]
+    pub fn read_be_i24(&mut self) -> io::Result<i32> {
+        Ok(((self.read_be_u24()? << 8) as i32) >> 8)
+    }
+
+    #[inline(always)]
+    pub fn read_i16(&mut self) -> io::Result<i16> {
+        Ok(i16::from_le_bytes(self.read_double_bytes()?))
+    }
+
+    #[inline(always)]
+    pub fn read_be_i16(&mut self) -> io::Result<i16> {
+        Ok(i16::from_be_bytes(self.read_double_bytes()?))
+    }
+
+    #[inline(always)]
+    pub fn read_i8(&mut self) -> io::Result<i8> {
+        Ok(self.read_byte()? as i8)
+    }
+
+    #[inline(always)]
+    pub fn read_f32(&mut self) -> io::Result<f32> {
+        Ok(f32::from_le_bytes(self.read_quad_bytes()?))
+    }
+
+    #[inline(always)]
+    pub fn read_be_f32(&mut self) -> io::Result<f32> {
+        Ok(f32::from_be_bytes(self.read_quad_bytes()?))
+    }
+
+    #[inline(always)]
+    pub fn read_f64(&mut self) -> io::Result<f64> {
+        let mut buf = [0u8; std::mem::size_of::<u64>()];
+        self.read_buf_exact(&mut buf)?;
+        Ok(f64::from_le_bytes(buf))
+    }
+
+    #[inline(always)]
+    pub fn read_be_f64(&mut self) -> io::Result<f64> {
+        let mut buf = [0u8; std::mem::size_of::<u64>()];
+        self.read_buf_exact(&mut buf)?;
+        Ok(f64::from_be_bytes(buf))
+    }
 }
 
 impl ReadBytes for BufReader<'_> {
