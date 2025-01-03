@@ -189,9 +189,9 @@ pub mod default {
         #[cfg(feature = "ogg")]
         pub use symphonia_format_ogg::OggReader;
         #[cfg(feature = "aiff")]
-        pub use symphonia_format_riff::AiffReader;
+        pub use symphonia_format_riff::AsyncAiffReader;
         #[cfg(feature = "wav")]
-        pub use symphonia_format_riff::WavReader;
+        pub use symphonia_format_riff::AsyncWavReader;
 
         #[deprecated = "use `default::formats::MpaReader` instead"]
         #[cfg(any(feature = "mp1", feature = "mp2", feature = "mp3"))]
@@ -303,10 +303,10 @@ pub mod default {
         probe.register_format::<formats::MpaReader<'_>>();
 
         #[cfg(feature = "aiff")]
-        probe.register_format::<formats::AiffReader<'_>>();
+        probe.register_format::<formats::AsyncAiffReader<'_>>();
 
         #[cfg(feature = "wav")]
-        probe.register_format::<formats::WavReader<'_>>();
+        probe.register_format::<formats::AsyncWavReader<'_>>();
 
         #[cfg(feature = "ogg")]
         probe.register_format::<formats::OggReader<'_>>();

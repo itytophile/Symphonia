@@ -47,7 +47,7 @@ pub struct WaveFormatChunk {
 }
 
 impl WaveFormatChunk {
-    fn read_pcm_fmt<B: ReadBytes>(
+    async fn read_pcm_fmt<B: ReadBytes>(
         reader: &mut B,
         bits_per_sample: u16,
         n_channels: u16,
@@ -62,13 +62,13 @@ impl WaveFormatChunk {
             // WaveFormatEx with extension data length field present, but no extension data.
             18 => {
                 // Extension data length should be 0.
-                let _extension_len = reader.read_be_u16()?;
+                let _extension_len = reader.read_be_u16().await?;
             }
             // WaveFormatEx with extension data length field present, and extension data.
             40 => {
                 // Extension data length should be either 0 or 22 (if valid data is present).
-                let _extension_len = reader.read_u16()?;
-                reader.ignore_bytes(22)?;
+                let _extension_len = reader.read_u16().await?;
+                reader.ignore_bytes(22).await?;
             }
             _ => return decode_error("wav: malformed fmt_pcm chunk"),
         }
@@ -96,7 +96,7 @@ impl WaveFormatChunk {
         Ok(FormatData::Pcm(FormatPcm { bits_per_sample, channels, codec }))
     }
 
-    fn read_adpcm_fmt<B: ReadBytes>(
+    async fn read_adpcm_fmt<B: ReadBytes>(
         reader: &mut B,
         bits_per_sample: u16,
         n_channels: u16,
@@ -112,7 +112,7 @@ impl WaveFormatChunk {
             return decode_error("wav: malformed fmt_adpcm chunk");
         }
 
-        let extra_size = reader.read_u16()? as u64;
+        let extra_size = reader.read_u16().await? as u64;
 
         match codec {
             CODEC_ID_ADPCM_MS if extra_size < 32 => {
@@ -123,13 +123,13 @@ impl WaveFormatChunk {
             }
             _ => (),
         }
-        reader.ignore_bytes(extra_size)?;
+        reader.ignore_bytes(extra_size).await?;
 
         let channels = map_wave_channel_count(n_channels)?;
         Ok(FormatData::Adpcm(FormatAdpcm { bits_per_sample, channels, codec }))
     }
 
-    fn read_ieee_fmt<B: ReadBytes>(
+    async fn read_ieee_fmt<B: ReadBytes>(
         reader: &mut B,
         bits_per_sample: u16,
         n_channels: u16,
@@ -140,7 +140,7 @@ impl WaveFormatChunk {
         match len {
             16 => (),
             18 => {
-                let extra_size = reader.read_u16()?;
+                let extra_size = reader.read_u16().await?;
                 if extra_size != 0 {
                     return decode_error("wav: extra data not expected for fmt_ieee chunk");
                 }
@@ -149,7 +149,7 @@ impl WaveFormatChunk {
                 // WAVEFORMATEXTENSIBLE is used for formats having more than two channels
                 // or higher sample resolutions than allowed by WAVEFORMATEX but for now
                 // we just ignore it
-                let _ = reader.ignore_bytes(40 - 16);
+                let _ = reader.ignore_bytes(40 - 16).await;
             }
             _ => return decode_error("wav: malformed fmt_ieee chunk"),
         }
@@ -169,7 +169,7 @@ impl WaveFormatChunk {
         Ok(FormatData::IeeeFloat(FormatIeeeFloat { channels, codec }))
     }
 
-    fn read_ext_fmt<B: ReadBytes>(
+    async fn read_ext_fmt<B: ReadBytes>(
         reader: &mut B,
         bits_per_coded_sample: u16,
         n_channels: u16,
@@ -180,14 +180,14 @@ impl WaveFormatChunk {
             return decode_error("wav: malformed fmt_ext chunk");
         }
 
-        let extra_size = reader.read_u16()?;
+        let extra_size = reader.read_u16().await?;
 
         // The size of the extra data for the Extensible format is exactly 22 bytes.
         if extra_size != 22 {
             return decode_error("wav: extra data size not 22 bytes for fmt_ext chunk");
         }
 
-        let bits_per_sample = reader.read_u16()?;
+        let bits_per_sample = reader.read_u16().await?;
 
         // Bits per coded sample for extensible formats is the width per sample as stored in the
         // stream. This must be a multiple of 8.
@@ -205,10 +205,10 @@ impl WaveFormatChunk {
         }
 
         // The channel mask.
-        let channel_mask = reader.read_u32()?;
+        let channel_mask = reader.read_u32().await?;
 
         let mut sub_format_guid = [0u8; 16];
-        reader.read_buf_exact(&mut sub_format_guid)?;
+        reader.read_buf_exact(&mut sub_format_guid).await?;
 
         // These GUIDs identifiy the format of the data chunks. These definitions can be found in
         // ksmedia.h of the Microsoft Windows Platform SDK.
@@ -324,7 +324,7 @@ impl WaveFormatChunk {
         }))
     }
 
-    fn read_alaw_pcm_fmt<B: ReadBytes>(
+    async fn read_alaw_pcm_fmt<B: ReadBytes>(
         reader: &mut B,
         n_channels: u16,
         len: u32,
@@ -333,17 +333,17 @@ impl WaveFormatChunk {
             return decode_error("wav: malformed fmt_alaw chunk");
         }
 
-        let extra_size = reader.read_u16()?;
+        let extra_size = reader.read_u16().await?;
 
         if extra_size > 0 {
-            reader.ignore_bytes(u64::from(extra_size))?;
+            reader.ignore_bytes(u64::from(extra_size)).await?;
         }
 
         let channels = map_wave_channel_count(n_channels)?;
         Ok(FormatData::ALaw(FormatALaw { codec: CODEC_ID_PCM_ALAW, channels }))
     }
 
-    fn read_mulaw_pcm_fmt<B: ReadBytes>(
+    async fn read_mulaw_pcm_fmt<B: ReadBytes>(
         reader: &mut B,
         n_channels: u16,
         len: u32,
@@ -352,10 +352,10 @@ impl WaveFormatChunk {
             return decode_error("wav: malformed fmt_mulaw chunk");
         }
 
-        let extra_size = reader.read_u16()?;
+        let extra_size = reader.read_u16().await?;
 
         if extra_size > 0 {
-            reader.ignore_bytes(u64::from(extra_size))?;
+            reader.ignore_bytes(u64::from(extra_size)).await?;
         }
 
         let channels = map_wave_channel_count(n_channels)?;
@@ -387,19 +387,23 @@ impl WaveFormatChunk {
 }
 
 impl ParseChunk for WaveFormatChunk {
-    fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], len: u32) -> Result<WaveFormatChunk> {
+    async fn parse<B: ReadBytes>(
+        reader: &mut B,
+        _tag: [u8; 4],
+        len: u32,
+    ) -> Result<WaveFormatChunk> {
         // WaveFormat has a minimal length of 16 bytes. This may be extended with format specific
         // data later.
         if len < 16 {
             return decode_error("wav: malformed fmt chunk");
         }
 
-        let format = reader.read_u16()?;
-        let n_channels = reader.read_u16()?;
-        let sample_rate = reader.read_u32()?;
-        let avg_bytes_per_sec = reader.read_u32()?;
-        let block_align = reader.read_u16()?;
-        let bits_per_sample = reader.read_u16()?;
+        let format = reader.read_u16().await?;
+        let n_channels = reader.read_u16().await?;
+        let sample_rate = reader.read_u32().await?;
+        let avg_bytes_per_sec = reader.read_u32().await?;
+        let block_align = reader.read_u16().await?;
+        let bits_per_sample = reader.read_u16().await?;
 
         // The definition of these format identifiers can be found in mmreg.h of the Microsoft
         // Windows Platform SDK.
@@ -413,27 +417,35 @@ impl ParseChunk for WaveFormatChunk {
 
         let format_data = match format {
             // The PCM Wave Format
-            WAVE_FORMAT_PCM => Self::read_pcm_fmt(reader, bits_per_sample, n_channels, len),
+            WAVE_FORMAT_PCM => Self::read_pcm_fmt(reader, bits_per_sample, n_channels, len).await,
             // The Microsoft ADPCM Format
             WAVE_FORMAT_ADPCM => {
                 Self::read_adpcm_fmt(reader, bits_per_sample, n_channels, len, CODEC_ID_ADPCM_MS)
+                    .await
             }
             // The IEEE Float Wave Format
-            WAVE_FORMAT_IEEE_FLOAT => Self::read_ieee_fmt(reader, bits_per_sample, n_channels, len),
+            WAVE_FORMAT_IEEE_FLOAT => {
+                Self::read_ieee_fmt(reader, bits_per_sample, n_channels, len).await
+            }
             // The Extensible Wave Format
-            WAVE_FORMAT_EXTENSIBLE => Self::read_ext_fmt(reader, bits_per_sample, n_channels, len),
+            WAVE_FORMAT_EXTENSIBLE => {
+                Self::read_ext_fmt(reader, bits_per_sample, n_channels, len).await
+            }
             // The Alaw Wave Format.
-            WAVE_FORMAT_ALAW => Self::read_alaw_pcm_fmt(reader, n_channels, len),
+            WAVE_FORMAT_ALAW => Self::read_alaw_pcm_fmt(reader, n_channels, len).await,
             // The MuLaw Wave Format.
-            WAVE_FORMAT_MULAW => Self::read_mulaw_pcm_fmt(reader, n_channels, len),
+            WAVE_FORMAT_MULAW => Self::read_mulaw_pcm_fmt(reader, n_channels, len).await,
             // The IMA ADPCM Format
-            WAVE_FORMAT_ADPCM_IMA => Self::read_adpcm_fmt(
-                reader,
-                bits_per_sample,
-                n_channels,
-                len,
-                CODEC_ID_ADPCM_IMA_WAV,
-            ),
+            WAVE_FORMAT_ADPCM_IMA => {
+                Self::read_adpcm_fmt(
+                    reader,
+                    bits_per_sample,
+                    n_channels,
+                    len,
+                    CODEC_ID_ADPCM_IMA_WAV,
+                )
+                .await
+            }
             // Unsupported format.
             _ => return unsupported_error("wav: unsupported wave format"),
         }?;
@@ -498,14 +510,14 @@ pub struct FactChunk {
 }
 
 impl ParseChunk for FactChunk {
-    fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], len: u32) -> Result<Self> {
+    async fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], len: u32) -> Result<Self> {
         // A Fact chunk is exactly 4 bytes long, though there is some mystery as to whether there
         // can be more fields in the chunk.
         if len != 4 {
             return decode_error("wav: malformed fact chunk");
         }
 
-        Ok(FactChunk { n_frames: reader.read_u32()? })
+        Ok(FactChunk { n_frames: reader.read_u32().await? })
     }
 }
 
@@ -523,20 +535,20 @@ pub struct ListChunk {
 }
 
 impl ListChunk {
-    pub fn skip<B: ReadBytes>(&self, reader: &mut B) -> Result<()> {
-        ChunksReader::<NullChunks>::new(self.len, ByteOrder::LittleEndian).finish(reader)
+    pub async fn skip<B: ReadBytes>(&self, reader: &mut B) -> Result<()> {
+        ChunksReader::<NullChunks>::new(self.len, ByteOrder::LittleEndian).finish(reader).await
     }
 }
 
 impl ParseChunk for ListChunk {
-    fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], len: u32) -> Result<Self> {
+    async fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], len: u32) -> Result<Self> {
         // A List chunk must contain atleast the list/form identifier. However, an empty list
         // (len == 4) is permissible.
         if len < 4 {
             return decode_error("wav: malformed list chunk");
         }
 
-        Ok(ListChunk { form: reader.read_quad_bytes()?, len: len - 4 })
+        Ok(ListChunk { form: reader.read_quad_bytes().await?, len: len - 4 })
     }
 }
 
@@ -555,9 +567,9 @@ pub struct InfoChunk {
 }
 
 impl ParseChunk for InfoChunk {
-    fn parse<B: ReadBytes>(reader: &mut B, tag: [u8; 4], len: u32) -> Result<InfoChunk> {
+    async fn parse<B: ReadBytes>(reader: &mut B, tag: [u8; 4], len: u32) -> Result<InfoChunk> {
         // TODO: Apply limit.
-        let buf = reader.read_boxed_slice_exact(len as usize)?;
+        let buf = reader.read_boxed_slice_exact(len as usize).await?;
         Ok(InfoChunk { tag, buf })
     }
 }
@@ -567,7 +579,7 @@ pub struct DataChunk {
 }
 
 impl ParseChunk for DataChunk {
-    fn parse<B: ReadBytes>(_: &mut B, _: [u8; 4], len: u32) -> Result<DataChunk> {
+    async fn parse<B: ReadBytes>(_: &mut B, _: [u8; 4], len: u32) -> Result<DataChunk> {
         Ok(DataChunk { len })
     }
 }
@@ -615,18 +627,21 @@ pub fn append_fact_params(track: &mut Track, fact: &FactChunk) {
     track.with_num_frames(u64::from(fact.n_frames));
 }
 
-pub fn read_info_chunk(source: &mut MediaSourceStream<'_>, len: u32) -> Result<MetadataRevision> {
+pub async fn read_info_chunk(
+    source: &mut MediaSourceStream<'_>,
+    len: u32,
+) -> Result<MetadataRevision> {
     let mut list = ChunksReader::<RiffInfoListChunks>::new(len, ByteOrder::LittleEndian);
 
     let mut builder = MetadataBuilder::new();
 
-    while let Some(RiffInfoListChunks::Info(info)) = list.next(source)? {
-        let info = info.parse(source)?;
+    while let Some(RiffInfoListChunks::Info(info)) = list.next(source).await? {
+        let info = info.parse(source).await?;
         // Ignore errors while parsing one chunk.
         let _ = riff::parse_riff_info_chunk(info.tag, &info.buf, &mut builder);
     }
 
-    list.finish(source)?;
+    list.finish(source).await?;
 
     Ok(builder.metadata())
 }

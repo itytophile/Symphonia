@@ -5,18 +5,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::io::{Seek, SeekFrom};
+use std::io::SeekFrom;
 
+use futures_util::future::BoxFuture;
+use futures_util::FutureExt;
 use symphonia_core::codecs::audio::AudioCodecParameters;
 use symphonia_core::codecs::CodecParameters;
 use symphonia_core::errors::{decode_error, seek_error, unsupported_error};
 use symphonia_core::errors::{Result, SeekErrorKind};
 use symphonia_core::formats::probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable};
 use symphonia_core::formats::well_known::FORMAT_ID_WAVE;
-use symphonia_core::formats::{prelude::*, FormatReaderInfo};
-use symphonia_core::io::*;
+use symphonia_core::formats::{
+    prelude::*, AsyncFormatReader, BlockingFormatReader, FormatReaderInfo,
+};
 use symphonia_core::meta::{Metadata, MetadataLog};
 use symphonia_core::support_format;
+use symphonia_core::{async_trait, io::*};
 
 use log::{debug, error};
 
@@ -40,7 +44,7 @@ const WAVE_FORMAT_INFO: FormatInfo = FormatInfo {
 /// Waveform Audio File Format (WAV) format reader.
 ///
 /// `WavReader` implements a demuxer for the WAVE container format.
-pub struct WavReader<'s> {
+pub struct AsyncWavReader<'s> {
     reader: MediaSourceStream<'s>,
     tracks: Vec<Track>,
     chapters: Option<ChapterGroup>,
@@ -50,27 +54,29 @@ pub struct WavReader<'s> {
     data_end_pos: u64,
 }
 
-impl<'s> WavReader<'s> {
-    pub fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+pub type WavReader<'s> = BlockingFormatReader<AsyncWavReader<'s>>;
+
+impl<'s> AsyncWavReader<'s> {
+    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         // A Wave file is one large RIFF chunk, with the actual meta and audio data contained in
         // nested chunks. Therefore, the file starts with a RIFF chunk header (chunk ID & size).
 
         // The top-level chunk has the RIFF chunk ID. This is also the file marker.
-        let marker = mss.read_quad_bytes()?;
+        let marker = mss.read_quad_bytes().await?;
 
         if marker != WAVE_STREAM_MARKER {
             return unsupported_error("wav: missing wave riff stream marker");
         }
 
         // The length of the top-level RIFF chunk. Must be atleast 4 bytes.
-        let riff_len = mss.read_u32()?;
+        let riff_len = mss.read_u32().await?;
 
         if riff_len < 4 {
             return decode_error("wav: invalid riff length");
         }
 
         // The form type. Only the WAVE form is supported.
-        let riff_form = mss.read_quad_bytes()?;
+        let riff_form = mss.read_quad_bytes().await?;
 
         if riff_form != WAVE_RIFF_FORM {
             error!("riff form is not wave ({})", String::from_utf8_lossy(&riff_form));
@@ -87,7 +93,7 @@ impl<'s> WavReader<'s> {
         let mut fact = None;
 
         loop {
-            let chunk = riff_chunks.next(&mut mss)?;
+            let chunk = riff_chunks.next(&mut mss).await?;
 
             // The last chunk should always be a data chunk, if it is not, then the stream is
             // unsupported.
@@ -97,7 +103,7 @@ impl<'s> WavReader<'s> {
 
             match chunk.unwrap() {
                 RiffWaveChunks::Format(fmt) => {
-                    let format = fmt.parse(&mut mss)?;
+                    let format = fmt.parse(&mut mss).await?;
 
                     // The Format chunk contains the block_align field and possible additional information
                     // to handle packetization and seeking.
@@ -110,20 +116,20 @@ impl<'s> WavReader<'s> {
                     append_format_params(&mut codec_params, format.format_data, format.sample_rate);
                 }
                 RiffWaveChunks::Fact(fct) => {
-                    fact = Some(fct.parse(&mut mss)?);
+                    fact = Some(fct.parse(&mut mss).await?);
                 }
                 RiffWaveChunks::List(lst) => {
-                    let list = lst.parse(&mut mss)?;
+                    let list = lst.parse(&mut mss).await?;
 
                     // Riff Lists can have many different forms, but WavReader only supports Info
                     // lists.
                     match &list.form {
-                        b"INFO" => metadata.push(read_info_chunk(&mut mss, list.len)?),
-                        _ => list.skip(&mut mss)?,
+                        b"INFO" => metadata.push(read_info_chunk(&mut mss, list.len).await?),
+                        _ => list.skip(&mut mss).await?,
                     }
                 }
                 RiffWaveChunks::Data(dat) => {
-                    let data = dat.parse(&mut mss)?;
+                    let data = dat.parse(&mut mss).await?;
 
                     // Record the bounds of the data chunk.
                     let data_start_pos = mss.pos();
@@ -143,7 +149,7 @@ impl<'s> WavReader<'s> {
                     append_data_params(&mut track, data.len as u64, &packet_info);
 
                     // Instantiate the reader.
-                    return Ok(WavReader {
+                    return Ok(AsyncWavReader {
                         reader: mss,
                         tracks: vec![track],
                         chapters: opts.external_data.chapters,
@@ -158,28 +164,36 @@ impl<'s> WavReader<'s> {
     }
 }
 
-impl Scoreable for WavReader<'_> {
-    fn score(mut src: ScopedStream<&mut MediaSourceStream<'_>>) -> Result<Score> {
-        // Perform simple scoring by testing that the RIFF stream marker and RIFF form are both
-        // valid for WAVE.
-        let riff_marker = src.read_quad_bytes()?;
-        src.ignore_bytes(4)?;
-        let riff_form = src.read_quad_bytes()?;
+impl Scoreable for AsyncWavReader<'_> {
+    fn score<'a>(
+        mut src: ScopedStream<&'a mut MediaSourceStream<'_>>,
+    ) -> BoxFuture<'a, Result<Score>> {
+        async move {
+            // Perform simple scoring by testing that the RIFF stream marker and RIFF form are both
+            // valid for WAVE.
+            let riff_marker = src.read_quad_bytes().await?;
+            src.ignore_bytes(4).await?;
+            let riff_form = src.read_quad_bytes().await?;
 
-        if riff_marker != WAVE_STREAM_MARKER || riff_form != WAVE_RIFF_FORM {
-            return Ok(Score::Unsupported);
+            if riff_marker != WAVE_STREAM_MARKER || riff_form != WAVE_RIFF_FORM {
+                return Ok(Score::Unsupported);
+            }
+
+            Ok(Score::Supported(255))
         }
-
-        Ok(Score::Supported(255))
+        .boxed()
     }
 }
 
-impl ProbeableFormat<'_> for WavReader<'_> {
+impl<'s> ProbeableFormat<'s> for AsyncWavReader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'_>,
+        mss: MediaSourceStream<'s>,
         opts: FormatOptions,
-    ) -> Result<Box<dyn FormatReader + '_>> {
-        Ok(Box::new(WavReader::try_new(mss, opts)?))
+    ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
+        async move {
+            Ok(Box::new(AsyncWavReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
+        }
+        .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
@@ -195,7 +209,7 @@ impl ProbeableFormat<'_> for WavReader<'_> {
     }
 }
 
-impl FormatReaderInfo for WavReader<'_> {
+impl FormatReaderInfo for AsyncWavReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &WAVE_FORMAT_INFO
     }
@@ -213,8 +227,9 @@ impl FormatReaderInfo for WavReader<'_> {
     }
 }
 
-impl FormatReader for WavReader<'_> {
-    fn next_packet(&mut self) -> Result<Option<Packet>> {
+#[async_trait]
+impl AsyncFormatReader for AsyncWavReader<'_> {
+    async fn next_packet(&mut self) -> Result<Option<Packet>> {
         next_packet(
             &mut self.reader,
             &self.packet_info,
@@ -222,9 +237,10 @@ impl FormatReader for WavReader<'_> {
             self.data_start_pos,
             self.data_end_pos,
         )
+        .await
     }
 
-    fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
+    async fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
         if self.tracks.is_empty() || self.packet_info.is_empty() {
             return seek_error(SeekErrorKind::Unseekable);
         }
@@ -271,14 +287,14 @@ impl FormatReader for WavReader<'_> {
         // If the reader supports seeking we can seek directly to the frame's offset wherever it may
         // be.
         if self.reader.is_seekable() {
-            self.reader.seek(SeekFrom::Start(seek_pos))?;
+            self.reader.seek(SeekFrom::Start(seek_pos)).await?;
         }
         // If the reader does not support seeking, we can only emulate forward seeks by consuming
         // bytes. If the reader has to seek backwards, return an error.
         else {
             let current_pos = self.reader.pos();
             if seek_pos >= current_pos {
-                self.reader.ignore_bytes(seek_pos - current_pos)?;
+                self.reader.ignore_bytes(seek_pos - current_pos).await?;
             }
             else {
                 return seek_error(SeekErrorKind::ForwardOnly);
@@ -288,12 +304,5 @@ impl FormatReader for WavReader<'_> {
         debug!("seeked to packet_ts={} (delta={})", actual_ts, actual_ts as i64 - ts as i64);
 
         Ok(SeekedTo { track_id: 0, actual_ts, required_ts: ts })
-    }
-
-    fn into_inner<'s>(self: Box<Self>) -> MediaSourceStream<'s>
-    where
-        Self: 's,
-    {
-        self.reader
     }
 }

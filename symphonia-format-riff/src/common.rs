@@ -57,7 +57,7 @@ impl<T: ParseChunkTag> ChunksReader<T> {
         ChunksReader { len, byte_order, consumed: 0, phantom: PhantomData }
     }
 
-    pub fn next<B: ReadBytes>(&mut self, reader: &mut B) -> Result<Option<T>> {
+    pub async fn next<B: ReadBytes>(&mut self, reader: &mut B) -> Result<Option<T>> {
         // Loop until a chunk is recognized and returned, or the end of stream is reached.
         loop {
             // Check if at the end.
@@ -67,7 +67,7 @@ impl<T: ParseChunkTag> ChunksReader<T> {
 
             // Align to the next 2-byte boundary if not currently aligned.
             if self.consumed & 0x1 == 1 {
-                reader.read_u8()?;
+                reader.read_u8().await?;
                 self.consumed += 1;
             }
 
@@ -77,11 +77,11 @@ impl<T: ParseChunkTag> ChunksReader<T> {
             }
 
             // Read tag and len, the chunk header.
-            let tag = reader.read_quad_bytes()?;
+            let tag = reader.read_quad_bytes().await?;
 
             let len = match self.byte_order {
-                ByteOrder::LittleEndian => reader.read_u32()?,
-                ByteOrder::BigEndian => reader.read_be_u32()?,
+                ByteOrder::LittleEndian => reader.read_u32().await?,
+                ByteOrder::BigEndian => reader.read_be_u32().await?,
             };
 
             self.consumed += 8;
@@ -115,22 +115,22 @@ impl<T: ParseChunkTag> ChunksReader<T> {
                         len
                     );
 
-                    reader.ignore_bytes(u64::from(len))?
+                    reader.ignore_bytes(u64::from(len)).await?
                 }
             }
         }
     }
-    pub fn finish<B: ReadBytes>(&mut self, reader: &mut B) -> Result<()> {
+    pub async fn finish<B: ReadBytes>(&mut self, reader: &mut B) -> Result<()> {
         // If data is remaining in this chunk, skip it.
         if self.consumed < self.len {
             let remaining = self.len - self.consumed;
-            reader.ignore_bytes(u64::from(remaining))?;
+            reader.ignore_bytes(u64::from(remaining)).await?;
             self.consumed += remaining;
         }
 
         // Pad the chunk to the next 2-byte boundary.
         if self.len & 0x1 == 1 {
-            reader.read_u8()?;
+            reader.read_u8().await?;
         }
 
         Ok(())
@@ -139,7 +139,7 @@ impl<T: ParseChunkTag> ChunksReader<T> {
 
 /// Common trait implemented for all chunks that are parsed by a `ChunkParser`.
 pub trait ParseChunk: Sized {
-    fn parse<B: ReadBytes>(reader: &mut B, tag: [u8; 4], len: u32) -> Result<Self>;
+    async fn parse<B: ReadBytes>(reader: &mut B, tag: [u8; 4], len: u32) -> Result<Self>;
 }
 
 /// `ChunkParser` is a utility struct for unifying the parsing of chunks.
@@ -154,8 +154,8 @@ impl<P: ParseChunk> ChunkParser<P> {
         ChunkParser { tag, len, phantom: PhantomData }
     }
 
-    pub fn parse<B: ReadBytes>(&self, reader: &mut B) -> Result<P> {
-        P::parse(reader, self.tag, self.len)
+    pub async fn parse<B: ReadBytes>(&self, reader: &mut B) -> Result<P> {
+        P::parse(reader, self.tag, self.len).await
     }
 }
 
@@ -266,7 +266,7 @@ impl PacketInfo {
     }
 }
 
-pub fn next_packet(
+pub async fn next_packet(
     reader: &mut MediaSourceStream<'_>,
     packet_info: &PacketInfo,
     tracks: &[Track],
@@ -295,7 +295,7 @@ pub fn next_packet(
     let packet_len = blocks_per_packet * packet_info.block_size;
 
     // Copy the frames.
-    let packet_buf = reader.read_boxed_slice(packet_len as usize)?;
+    let packet_buf = reader.read_boxed_slice(packet_len as usize).await?;
 
     // The packet timestamp is the position of the first byte of the first frame in the
     // packet relative to the start of the data chunk divided by the length per frame.

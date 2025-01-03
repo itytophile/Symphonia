@@ -141,13 +141,13 @@ impl CommonChunk {
 }
 
 impl ParseChunk for CommonChunk {
-    fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], _: u32) -> Result<CommonChunk> {
-        let n_channels = reader.read_be_i16()?;
-        let n_sample_frames = reader.read_be_u32()?;
-        let sample_size = reader.read_be_i16()?;
+    async fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], _: u32) -> Result<CommonChunk> {
+        let n_channels = reader.read_be_i16().await?;
+        let n_sample_frames = reader.read_be_u32().await?;
+        let sample_size = reader.read_be_i16().await?;
 
         let mut sample_rate: [u8; 10] = [0; 10];
-        reader.read_buf_exact(sample_rate.as_mut())?;
+        reader.read_buf_exact(sample_rate.as_mut()).await?;
 
         let sample_rate = Extended::from_be_bytes(sample_rate);
         let sample_rate = sample_rate.to_f64() as u32;
@@ -206,34 +206,34 @@ impl fmt::Display for CommonChunk {
 }
 
 pub trait CommonChunkParser {
-    fn parse_aiff(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk>;
-    fn parse_aifc(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk>;
+    async fn parse_aiff(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk>;
+    async fn parse_aifc(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk>;
 }
 
 impl CommonChunkParser for ChunkParser<CommonChunk> {
-    fn parse_aiff(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk> {
-        self.parse(source)
+    async fn parse_aiff(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk> {
+        self.parse(source).await
     }
 
-    fn parse_aifc(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk> {
-        let n_channels = source.read_be_i16()?;
-        let n_sample_frames = source.read_be_u32()?;
-        let sample_size = source.read_be_i16()?;
+    async fn parse_aifc(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk> {
+        let n_channels = source.read_be_i16().await?;
+        let n_sample_frames = source.read_be_u32().await?;
+        let sample_size = source.read_be_i16().await?;
 
         let mut sample_rate: [u8; 10] = [0; 10];
-        source.read_buf_exact(sample_rate.as_mut())?;
+        source.read_buf_exact(sample_rate.as_mut()).await?;
 
         let sample_rate = Extended::from_be_bytes(sample_rate);
         let sample_rate = sample_rate.to_f64() as u32;
 
-        let compression_type = source.read_quad_bytes()?;
+        let compression_type = source.read_quad_bytes().await?;
 
         // Ignore pascal string containing compression_name
-        let str_len = source.read_byte()?;
-        source.ignore_bytes(str_len as u64)?;
+        let str_len = source.read_byte().await?;
+        source.ignore_bytes(str_len as u64).await?;
         // Total number of bytes in pascal string must be even, since len is excluded from our var, we add 1
         if (str_len + 1) % 2 != 0 {
-            source.ignore_bytes(1)?;
+            source.ignore_bytes(1).await?;
         }
 
         let format_data = match &compression_type {
@@ -266,9 +266,9 @@ pub struct SoundChunk {
 }
 
 impl ParseChunk for SoundChunk {
-    fn parse<B: ReadBytes>(reader: &mut B, _: [u8; 4], len: u32) -> Result<SoundChunk> {
-        let offset = reader.read_be_u32()?;
-        let block_size = reader.read_be_u32()?;
+    async fn parse<B: ReadBytes>(reader: &mut B, _: [u8; 4], len: u32) -> Result<SoundChunk> {
+        let offset = reader.read_be_u32().await?;
+        let block_size = reader.read_be_u32().await?;
 
         if offset != 0 || block_size != 0 {
             return unsupported_error("riff: No support for AIFF block-aligned data");
@@ -291,15 +291,15 @@ pub struct Marker {
 }
 
 impl ParseChunk for MarkerChunk {
-    fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], _len: u32) -> Result<Self> {
-        let num_markers = reader.read_be_u16()?;
+    async fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], _len: u32) -> Result<Self> {
+        let num_markers = reader.read_be_u16().await?;
 
         let mut markers = Vec::with_capacity(usize::from(num_markers));
 
         for _ in 0..num_markers {
-            let id = reader.read_be_i16()?;
-            let ts = reader.read_be_u32()?;
-            let name = read_pascal_string(reader)?;
+            let id = reader.read_be_i16().await?;
+            let ts = reader.read_be_u32().await?;
+            let name = read_pascal_string(reader).await?;
 
             markers.push(Marker { id, ts, name });
         }
@@ -314,15 +314,15 @@ pub struct AppSpecificChunk {
 }
 
 impl ParseChunk for AppSpecificChunk {
-    fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], len: u32) -> Result<Self> {
+    async fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], len: u32) -> Result<Self> {
         let start_pos = reader.pos();
 
         // The application signature.
-        let signature = reader.read_quad_bytes()?;
+        let signature = reader.read_quad_bytes().await?;
 
         // If the signature is "pdos", an application name is present before the app-specific data.
         let application = match &signature {
-            b"pdos" => read_pascal_string(reader)?,
+            b"pdos" => read_pascal_string(reader).await?,
             _ => format!("{:x}", u32::from_be_bytes(signature)),
         };
 
@@ -333,7 +333,7 @@ impl ParseChunk for AppSpecificChunk {
             return decode_error("aiff: malformed application-specific chunk");
         }
 
-        let data = reader.read_boxed_slice_exact((len - consumed) as usize)?;
+        let data = reader.read_boxed_slice_exact((len - consumed) as usize).await?;
 
         Ok(AppSpecificChunk { application, data })
     }
@@ -352,16 +352,16 @@ pub struct Comment {
 }
 
 impl ParseChunk for CommentsChunk {
-    fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], _len: u32) -> Result<Self> {
-        let num_comments = reader.read_be_u16()?;
+    async fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], _len: u32) -> Result<Self> {
+        let num_comments = reader.read_be_u16().await?;
 
         let mut comments = Vec::with_capacity(usize::from(num_comments));
 
         for _ in 0..num_comments {
-            let timestamp = reader.read_be_u32()?;
-            let marker_id = reader.read_be_i16()?;
-            let len = reader.read_be_u16()?;
-            let buf = reader.read_boxed_slice_exact(usize::from(len))?;
+            let timestamp = reader.read_be_u32().await?;
+            let marker_id = reader.read_be_i16().await?;
+            let len = reader.read_be_u16().await?;
+            let buf = reader.read_boxed_slice_exact(usize::from(len)).await?;
 
             comments.push(Comment { timestamp, marker_id, text: decode_string(&buf) });
         }
@@ -375,8 +375,8 @@ pub struct TextChunk {
 }
 
 impl ParseChunk for TextChunk {
-    fn parse<B: ReadBytes>(reader: &mut B, tag: [u8; 4], len: u32) -> Result<Self> {
-        let text = reader.read_boxed_slice_exact(len as usize)?;
+    async fn parse<B: ReadBytes>(reader: &mut B, tag: [u8; 4], len: u32) -> Result<Self> {
+        let text = reader.read_boxed_slice_exact(len as usize).await?;
 
         let value = Arc::new(decode_string(&text));
 
@@ -399,10 +399,10 @@ pub struct Id3Chunk {
 }
 
 impl ParseChunk for Id3Chunk {
-    fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], _len: u32) -> Result<Self> {
+    async fn parse<B: ReadBytes>(reader: &mut B, _tag: [u8; 4], _len: u32) -> Result<Self> {
         let mut builder = MetadataBuilder::new();
         let mut side_data = Vec::new();
-        riff::read_riff_id3_chunk(reader, &mut builder, &mut side_data)?;
+        riff::read_riff_id3_chunk(reader, &mut builder, &mut side_data).await?;
         Ok(Id3Chunk { metadata: builder.metadata() })
     }
 }
@@ -440,15 +440,15 @@ impl ParseChunkTag for RiffAiffChunks {
     }
 }
 
-fn read_pascal_string<B: ReadBytes>(reader: &mut B) -> Result<String> {
-    let len = reader.read_byte()?;
-    let value = reader.read_boxed_slice_exact(usize::from(len))?;
+async fn read_pascal_string<B: ReadBytes>(reader: &mut B) -> Result<String> {
+    let len = reader.read_byte().await?;
+    let value = reader.read_boxed_slice_exact(usize::from(len)).await?;
 
     // If the length of the string data is even, then the total length of the pascal string would be
     // odd with the length byte. Read an additional padding byte such that the pascal string is an
     // even length in total.
     if len & 1 == 0 {
-        let _ = reader.read_byte()?;
+        let _ = reader.read_byte().await?;
     }
 
     Ok(decode_string(&value))

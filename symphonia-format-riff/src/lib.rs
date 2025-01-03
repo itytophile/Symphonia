@@ -22,6 +22,6 @@ mod aiff;
 mod wave;
 
 #[cfg(feature = "aiff")]
-pub use aiff::AiffReader;
+pub use aiff::AsyncAiffReader;
 #[cfg(feature = "wav")]
-pub use wave::WavReader;
+pub use wave::AsyncWavReader;

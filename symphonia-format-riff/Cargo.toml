@@ -19,6 +19,7 @@ wav = []
 
 [dependencies]
 extended = "0.1.0"
+futures-util = "0.3.31"
 log = "0.4"
 symphonia-core = { version = "0.5.4", path = "../symphonia-core" }
 
