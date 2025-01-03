@@ -6,9 +6,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::chunks::*;
+use futures_util::{
+    future::{self, BoxFuture},
+    FutureExt,
+};
 use log::{debug, error, info};
-use std::io::{Seek, SeekFrom};
+use std::io::SeekFrom;
 use symphonia_core::{
+    async_trait,
     audio::{Channels, Position},
     codecs::{audio::*, CodecParameters},
     errors::{decode_error, seek_error, unsupported_error, Result, SeekErrorKind},
@@ -16,7 +21,7 @@ use symphonia_core::{
         prelude::*,
         probe::{ProbeFormatData, ProbeableFormat, Score, Scoreable},
         well_known::FORMAT_ID_CAF,
-        FormatReaderInfo,
+        AsyncFormatReader, BlockingFormatReader, FormatReaderInfo,
     },
     io::*,
     meta::{Metadata, MetadataLog},
@@ -29,10 +34,12 @@ const MAX_FRAMES_PER_PACKET: u64 = 1152;
 const CAF_FORMAT_INFO: FormatInfo =
     FormatInfo { format: FORMAT_ID_CAF, short_name: "caf", long_name: "Core Audio Format" };
 
+pub type CafReader<'s> = BlockingFormatReader<AsyncCafReader<'s>>;
+
 /// Core Audio Format (CAF) format reader.
 ///
 /// `CafReader` implements a demuxer for Core Audio Format containers.
-pub struct CafReader<'s> {
+pub struct AsyncCafReader<'s> {
     reader: MediaSourceStream<'s>,
     tracks: Vec<Track>,
     chapters: Option<ChapterGroup>,
@@ -48,18 +55,23 @@ enum PacketInfo {
     Compressed { packets: Vec<CafPacket>, current_packet_index: usize },
 }
 
-impl Scoreable for CafReader<'_> {
-    fn score(_src: ScopedStream<&mut MediaSourceStream<'_>>) -> Result<Score> {
-        Ok(Score::Supported(255))
+impl Scoreable for AsyncCafReader<'_> {
+    fn score<'s>(
+        _src: ScopedStream<&'s mut MediaSourceStream<'_>>,
+    ) -> BoxFuture<'s, Result<Score>> {
+        future::ok(Score::Supported(255)).boxed()
     }
 }
 
-impl ProbeableFormat<'_> for CafReader<'_> {
-    fn try_probe_new(
-        mss: MediaSourceStream<'_>,
+impl ProbeableFormat<'_> for AsyncCafReader<'_> {
+    fn try_probe_new<'s>(
+        mss: MediaSourceStream<'s>,
         opts: FormatOptions,
-    ) -> Result<Box<dyn FormatReader + '_>> {
-        Ok(Box::new(CafReader::try_new(mss, opts)?))
+    ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
+        async {
+            Ok(Box::new(AsyncCafReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
+        }
+        .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
@@ -67,7 +79,7 @@ impl ProbeableFormat<'_> for CafReader<'_> {
     }
 }
 
-impl FormatReaderInfo for CafReader<'_> {
+impl FormatReaderInfo for AsyncCafReader<'_> {
     fn format_info(&self) -> &FormatInfo {
         &CAF_FORMAT_INFO
     }
@@ -85,8 +97,9 @@ impl FormatReaderInfo for CafReader<'_> {
     }
 }
 
-impl FormatReader for CafReader<'_> {
-    fn next_packet(&mut self) -> Result<Option<Packet>> {
+#[async_trait]
+impl AsyncFormatReader for AsyncCafReader<'_> {
+    async fn next_packet(&mut self) -> Result<Option<Packet>> {
         match &mut self.packet_info {
             PacketInfo::Uncompressed { bytes_per_frame } => {
                 let pos = self.reader.pos();
@@ -109,13 +122,13 @@ impl FormatReader for CafReader<'_> {
                 let bytes_to_read = max_bytes_to_read.min(bytes_remaining);
                 let packet_duration = bytes_to_read / bytes_per_frame;
                 let packet_timestamp = data_pos / bytes_per_frame;
-                let buffer = self.reader.read_boxed_slice(bytes_to_read as usize)?;
+                let buffer = self.reader.read_boxed_slice(bytes_to_read as usize).await?;
                 Ok(Some(Packet::new_from_boxed_slice(0, packet_timestamp, packet_duration, buffer)))
             }
             PacketInfo::Compressed { packets, ref mut current_packet_index } => {
                 if let Some(packet) = packets.get(*current_packet_index) {
                     *current_packet_index += 1;
-                    let buffer = self.reader.read_boxed_slice(packet.size as usize)?;
+                    let buffer = self.reader.read_boxed_slice(packet.size as usize).await?;
                     Ok(Some(Packet::new_from_boxed_slice(
                         0,
                         packet.start_frame,
@@ -134,7 +147,7 @@ impl FormatReader for CafReader<'_> {
         }
     }
 
-    fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
+    async fn seek(&mut self, _mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
         let required_ts = match to {
             SeekTo::TimeStamp { ts, .. } => ts,
             SeekTo::Time { time, .. } => {
@@ -163,12 +176,12 @@ impl FormatReader for CafReader<'_> {
                 let seek_pos = self.data_start_pos + actual_ts * (*bytes_per_frame as u64);
 
                 if self.reader.is_seekable() {
-                    self.reader.seek(SeekFrom::Start(seek_pos))?;
+                    self.reader.seek(SeekFrom::Start(seek_pos)).await?;
                 }
                 else {
                     let current_pos = self.reader.pos();
                     if seek_pos >= current_pos {
-                        self.reader.ignore_bytes(seek_pos - current_pos)?;
+                        self.reader.ignore_bytes(seek_pos - current_pos).await?;
                     }
                     else {
                         return seek_error(SeekErrorKind::ForwardOnly);
@@ -208,12 +221,12 @@ impl FormatReader for CafReader<'_> {
                 let seek_pos = self.data_start_pos + seek_packet.data_offset;
 
                 if self.reader.is_seekable() {
-                    self.reader.seek(SeekFrom::Start(seek_pos))?;
+                    self.reader.seek(SeekFrom::Start(seek_pos)).await?;
                 }
                 else {
                     let current_pos = self.reader.pos();
                     if seek_pos >= current_pos {
-                        self.reader.ignore_bytes(seek_pos - current_pos)?;
+                        self.reader.ignore_bytes(seek_pos - current_pos).await?;
                     }
                     else {
                         return seek_error(SeekErrorKind::ForwardOnly);
@@ -236,17 +249,10 @@ impl FormatReader for CafReader<'_> {
             PacketInfo::Unknown => decode_error("caf: missing packet info"),
         }
     }
-
-    fn into_inner<'s>(self: Box<Self>) -> MediaSourceStream<'s>
-    where
-        Self: 's,
-    {
-        self.reader
-    }
 }
 
-impl<'s> CafReader<'s> {
-    pub fn try_new(mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+impl<'s> AsyncCafReader<'s> {
+    pub async fn try_new(mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         let mut reader = Self {
             reader: mss,
             tracks: vec![],
@@ -257,8 +263,8 @@ impl<'s> CafReader<'s> {
             packet_info: PacketInfo::Unknown,
         };
 
-        reader.check_file_header()?;
-        let track = reader.read_chunks()?;
+        reader.check_file_header().await?;
+        let track = reader.read_chunks().await?;
 
         reader.tracks.push(track);
 
@@ -273,20 +279,20 @@ impl<'s> CafReader<'s> {
         self.tracks.first().and_then(|track| track.num_frames)
     }
 
-    fn check_file_header(&mut self) -> Result<()> {
-        let file_type = self.reader.read_quad_bytes()?;
+    async fn check_file_header(&mut self) -> Result<()> {
+        let file_type = self.reader.read_quad_bytes().await?;
         if file_type != *b"caff" {
             return unsupported_error("caf: missing 'caff' stream marker");
         }
 
-        let file_version = self.reader.read_be_u16()?;
+        let file_version = self.reader.read_be_u16().await?;
         if file_version != 1 {
             error!("unsupported file version ({})", file_version);
             return unsupported_error("caf: unsupported file version");
         }
 
         // Ignored in CAF v1
-        let _file_flags = self.reader.read_be_u16()?;
+        let _file_flags = self.reader.read_be_u16().await?;
 
         Ok(())
     }
@@ -341,7 +347,7 @@ impl<'s> CafReader<'s> {
         Ok(())
     }
 
-    fn read_chunks(&mut self) -> Result<Track> {
+    async fn read_chunks(&mut self) -> Result<Track> {
         use Chunk::*;
 
         let mut codec_params = AudioCodecParameters::new();
@@ -349,7 +355,7 @@ impl<'s> CafReader<'s> {
         let mut num_frames = None;
 
         loop {
-            match Chunk::read(&mut self.reader, &audio_desc)? {
+            match Chunk::read(&mut self.reader, &audio_desc).await? {
                 Some(AudioDescription(desc)) => {
                     if audio_desc.is_some() {
                         return decode_error("caf: additional Audio Description chunk");
@@ -399,7 +405,7 @@ impl<'s> CafReader<'s> {
                     // If we've reached the end of the file, then the Audio Data chunk should have
                     // had a defined size, and we should seek to the start of the audio data.
                     if self.data_len.is_some() {
-                        self.reader.seek(SeekFrom::Start(self.data_start_pos))?;
+                        self.reader.seek(SeekFrom::Start(self.data_start_pos)).await?;
                     }
                     break;
                 }

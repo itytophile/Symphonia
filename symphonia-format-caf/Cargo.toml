@@ -13,5 +13,9 @@ edition = "2021"
 rust-version = "1.77"
 
 [dependencies]
+futures-util = "0.3.31"
 log = "0.4"
 symphonia-core = { version = "0.5.4", path = "../symphonia-core" }
+
+[dev-dependencies]
+futures-executor = "0.3.31"

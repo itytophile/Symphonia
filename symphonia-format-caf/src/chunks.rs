@@ -78,23 +78,23 @@ impl Chunk {
     ///
     /// The first chunk read will be the AudioDescription chunk. Once it's been read, the caller
     /// should pass it in to subsequent read calls.
-    pub fn read(
+    pub async fn read(
         reader: &mut MediaSourceStream<'_>,
         audio_description: &Option<AudioDescription>,
     ) -> Result<Option<Self>> {
-        let chunk_type = reader.read_quad_bytes()?;
-        let chunk_size = reader.read_be_i64()?;
+        let chunk_type = reader.read_quad_bytes().await?;
+        let chunk_size = reader.read_be_i64().await?;
 
         let result = match &chunk_type {
-            b"desc" => Chunk::AudioDescription(AudioDescription::read(reader, chunk_size)?),
-            b"data" => Chunk::AudioData(AudioData::read(reader, chunk_size)?),
-            b"chan" => Chunk::ChannelLayout(ChannelLayout::read(reader, chunk_size)?),
+            b"desc" => Chunk::AudioDescription(AudioDescription::read(reader, chunk_size).await?),
+            b"data" => Chunk::AudioData(AudioData::read(reader, chunk_size).await?),
+            b"chan" => Chunk::ChannelLayout(ChannelLayout::read(reader, chunk_size).await?),
             b"pakt" => {
-                Chunk::PacketTable(PacketTable::read(reader, audio_description, chunk_size)?)
+                Chunk::PacketTable(PacketTable::read(reader, audio_description, chunk_size).await?)
             }
             b"kuki" => {
                 if let Ok(chunk_size) = usize::try_from(chunk_size) {
-                    Chunk::MagicCookie(reader.read_boxed_slice_exact(chunk_size)?)
+                    Chunk::MagicCookie(reader.read_boxed_slice_exact(chunk_size).await?)
                 }
                 else {
                     return invalid_chunk_size_error("Magic Cookie", chunk_size);
@@ -104,7 +104,7 @@ impl Chunk {
                 if chunk_size < 0 {
                     return invalid_chunk_size_error("Free", chunk_size);
                 }
-                reader.ignore_bytes(chunk_size as u64)?;
+                reader.ignore_bytes(chunk_size as u64).await?;
                 Chunk::Free
             }
             other => {
@@ -112,7 +112,7 @@ impl Chunk {
                 info!("unsupported chunk type ('{}')", str::from_utf8(other).unwrap_or("????"));
 
                 if chunk_size >= 0 {
-                    reader.ignore_bytes(chunk_size as u64)?;
+                    reader.ignore_bytes(chunk_size as u64).await?;
                     return Ok(None);
                 }
                 else {
@@ -137,27 +137,27 @@ pub struct AudioDescription {
 }
 
 impl AudioDescription {
-    pub fn read(reader: &mut MediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
+    pub async fn read(reader: &mut MediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
         if chunk_size != 32 {
             return invalid_chunk_size_error("Audio Description", chunk_size);
         }
 
-        let sample_rate = reader.read_be_f64()?;
+        let sample_rate = reader.read_be_f64().await?;
         if sample_rate == 0.0 {
             return decode_error("caf: sample rate must be not be zero");
         }
 
-        let format_id = AudioDescriptionFormatId::read(reader)?;
+        let format_id = AudioDescriptionFormatId::read(reader).await?;
 
-        let bytes_per_packet = reader.read_be_u32()?;
-        let frames_per_packet = reader.read_be_u32()?;
+        let bytes_per_packet = reader.read_be_u32().await?;
+        let frames_per_packet = reader.read_be_u32().await?;
 
-        let channels_per_frame = reader.read_be_u32()?;
+        let channels_per_frame = reader.read_be_u32().await?;
         if channels_per_frame == 0 {
             return decode_error("caf: channels per frame must be not be zero");
         }
 
-        let bits_per_channel = reader.read_be_u32()?;
+        let bits_per_channel = reader.read_be_u32().await?;
 
         Ok(Self {
             sample_rate,
@@ -233,14 +233,14 @@ pub struct AudioData {
 }
 
 impl AudioData {
-    pub fn read(reader: &mut MediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
+    pub async fn read(reader: &mut MediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
         let edit_count_offset = size_of::<u32>() as i64;
 
         if chunk_size != -1 && chunk_size < edit_count_offset {
             return invalid_chunk_size_error("Audio Data", chunk_size);
         }
 
-        let edit_count = reader.read_be_u32()?;
+        let edit_count = reader.read_be_u32().await?;
         let start_pos = reader.pos();
 
         if chunk_size == -1 {
@@ -249,7 +249,7 @@ impl AudioData {
 
         let data_len = (chunk_size - edit_count_offset) as u64;
         debug!("data_len: {}", data_len);
-        reader.ignore_bytes(data_len)?;
+        reader.ignore_bytes(data_len).await?;
         Ok(Self { _edit_count: edit_count, start_pos, data_len: Some(data_len) })
     }
 }
@@ -272,11 +272,11 @@ pub enum AudioDescriptionFormatId {
 }
 
 impl AudioDescriptionFormatId {
-    pub fn read(reader: &mut MediaSourceStream<'_>) -> Result<Self> {
+    pub async fn read(reader: &mut MediaSourceStream<'_>) -> Result<Self> {
         use AudioDescriptionFormatId::*;
 
-        let format_id = reader.read_quad_bytes()?;
-        let format_flags = reader.read_be_u32()?;
+        let format_id = reader.read_quad_bytes().await?;
+        let format_flags = reader.read_be_u32().await?;
 
         let result = match &format_id {
             // Formats mentioned in the spec
@@ -325,17 +325,20 @@ pub struct ChannelLayout {
 }
 
 impl ChannelLayout {
-    pub fn read(reader: &mut MediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
+    pub async fn read(reader: &mut MediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
         if chunk_size < 12 {
             return invalid_chunk_size_error("Channel Layout", chunk_size);
         }
 
-        let channel_layout = reader.read_be_u32()?;
-        let channel_bitmap = reader.read_be_u32()?;
-        let channel_description_count = reader.read_be_u32()?;
-        let channel_descriptions: Vec<ChannelDescription> = (0..channel_description_count)
-            .map(|_| ChannelDescription::read(reader))
-            .collect::<Result<_>>()?;
+        let channel_layout = reader.read_be_u32().await?;
+        let channel_bitmap = reader.read_be_u32().await?;
+        let channel_description_count = reader.read_be_u32().await?;
+        let mut channel_descriptions = Vec::<ChannelDescription>::with_capacity(
+            usize::try_from(channel_description_count).unwrap(),
+        );
+        for _ in 0..channel_description_count {
+            channel_descriptions.push(ChannelDescription::read(reader).await?);
+        }
 
         Ok(Self { channel_layout, channel_bitmap, channel_descriptions })
     }
@@ -435,11 +438,15 @@ pub struct ChannelDescription {
 }
 
 impl ChannelDescription {
-    pub fn read(reader: &mut MediaSourceStream<'_>) -> Result<Self> {
+    pub async fn read(reader: &mut MediaSourceStream<'_>) -> Result<Self> {
         Ok(Self {
-            channel_label: reader.read_be_u32()?,
-            channel_flags: reader.read_be_u32()?,
-            coordinates: [reader.read_be_f32()?, reader.read_be_f32()?, reader.read_be_f32()?],
+            channel_label: reader.read_be_u32().await?,
+            channel_flags: reader.read_be_u32().await?,
+            coordinates: [
+                reader.read_be_f32().await?,
+                reader.read_be_f32().await?,
+                reader.read_be_f32().await?,
+            ],
         })
     }
 }
@@ -452,7 +459,7 @@ pub struct PacketTable {
 }
 
 impl PacketTable {
-    pub fn read(
+    pub async fn read(
         reader: &mut MediaSourceStream<'_>,
         desc: &Option<AudioDescription>,
         chunk_size: i64,
@@ -466,20 +473,20 @@ impl PacketTable {
             Error::DecodeError("caf: missing audio descripton")
         })?;
 
-        let total_packets = reader.read_be_i64()?;
+        let total_packets = reader.read_be_i64().await?;
         if total_packets < 0 {
             error!("invalid number of packets in the packet table ({})", total_packets);
             return decode_error("caf: invalid number of packets in the packet table");
         }
 
-        let valid_frames = reader.read_be_i64()?;
+        let valid_frames = reader.read_be_i64().await?;
         if valid_frames < 0 {
             error!("invalid number of frames in the packet table ({})", valid_frames);
             return decode_error("caf: invalid number of frames in the packet table");
         }
 
-        let priming_frames = reader.read_be_i32()?;
-        let remainder_frames = reader.read_be_i32()?;
+        let priming_frames = reader.read_be_i32().await?;
+        let remainder_frames = reader.read_be_i32().await?;
 
         let mut packets = Vec::with_capacity(total_packets as usize);
         let mut current_frame = 0;
@@ -489,8 +496,8 @@ impl PacketTable {
             // Variable bytes per packet, variable number of frames
             (0, 0) => {
                 for _ in 0..total_packets {
-                    let size = read_variable_length_integer(reader)?;
-                    let frames = read_variable_length_integer(reader)?;
+                    let size = read_variable_length_integer(reader).await?;
+                    let frames = read_variable_length_integer(reader).await?;
                     packets.push(CafPacket {
                         size,
                         frames,
@@ -504,7 +511,7 @@ impl PacketTable {
             // Variable bytes per packet, constant number of frames
             (0, frames_per_packet) => {
                 for _ in 0..total_packets {
-                    let size = read_variable_length_integer(reader)?;
+                    let size = read_variable_length_integer(reader).await?;
                     let frames = frames_per_packet as u64;
                     packets.push(CafPacket {
                         size,
@@ -520,7 +527,7 @@ impl PacketTable {
             (bytes_per_packet, 0) => {
                 for _ in 0..total_packets {
                     let size = bytes_per_packet as u64;
-                    let frames = read_variable_length_integer(reader)?;
+                    let frames = read_variable_length_integer(reader).await?;
                     packets.push(CafPacket {
                         size,
                         frames,
@@ -582,11 +589,11 @@ fn invalid_chunk_size_error<T>(chunk_type: &str, chunk_size: i64) -> Result<T> {
     decode_error("caf: invalid chunk size")
 }
 
-fn read_variable_length_integer(reader: &mut MediaSourceStream<'_>) -> Result<u64> {
+async fn read_variable_length_integer(reader: &mut MediaSourceStream<'_>) -> Result<u64> {
     let mut result = 0;
 
     for _ in 0..9 {
-        let byte = reader.read_byte()?;
+        let byte = reader.read_byte().await?;
 
         result |= (byte & 0x7f) as u64;
 
@@ -602,15 +609,16 @@ fn read_variable_length_integer(reader: &mut MediaSourceStream<'_>) -> Result<u6
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-
     use super::*;
 
     fn variable_length_integer_test(bytes: &[u8], expected: u64) -> Result<()> {
-        let cursor = Cursor::new(Vec::from(bytes));
-        let mut source = MediaSourceStream::new(Box::new(cursor), Default::default());
+        let cursor = futures_util::io::Cursor::new(Vec::from(bytes));
+        let mut source = MediaSourceStream::new(Box::pin(cursor), Default::default());
 
-        assert_eq!(read_variable_length_integer(&mut source)?, expected);
+        assert_eq!(
+            futures_executor::block_on(read_variable_length_integer(&mut source))?,
+            expected
+        );
 
         Ok(())
     }
@@ -630,9 +638,11 @@ mod tests {
 
     #[test]
     fn unterminated_variable_length_integer() {
-        let cursor = Cursor::new(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
-        let mut source = MediaSourceStream::new(Box::new(cursor), Default::default());
+        let cursor = futures_util::io::Cursor::new(&[
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        ]);
+        let mut source = MediaSourceStream::new(Box::pin(cursor), Default::default());
 
-        assert!(read_variable_length_integer(&mut source).is_err());
+        assert!(futures_executor::block_on(read_variable_length_integer(&mut source)).is_err());
     }
 }
