@@ -17,11 +17,11 @@
 mod common;
 
 #[cfg(feature = "aiff")]
-mod aiff;
+pub mod aiff;
 #[cfg(feature = "wav")]
-mod wave;
+pub mod wave;
 
 #[cfg(feature = "aiff")]
 pub use aiff::{AiffReader, AsyncAiffReader};
 #[cfg(feature = "wav")]
-pub use wave::{try_new, try_new_async, AsyncWavReader, WavReader};
+pub use wave::{AsyncWavReader, WavReader};
