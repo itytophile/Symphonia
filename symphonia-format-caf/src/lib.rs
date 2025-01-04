@@ -17,4 +17,4 @@
 mod chunks;
 mod demuxer;
 
-pub use demuxer::{AsyncCafReader, CafReader, try_new, try_new_async};
+pub use demuxer::{try_new, try_new_async, AsyncCafReader, CafReader};

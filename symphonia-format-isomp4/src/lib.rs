@@ -18,4 +18,4 @@ mod demuxer;
 mod fp;
 mod stream;
 
-pub use demuxer::{AsyncIsoMp4Reader, IsoMp4Reader};
+pub use demuxer::{try_new, try_new_async, AsyncIsoMp4Reader, IsoMp4Reader};

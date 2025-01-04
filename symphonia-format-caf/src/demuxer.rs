@@ -68,10 +68,8 @@ impl ProbeableFormat<'_> for AsyncCafReader<'_> {
         mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
-        async {
-            Ok(Box::new(try_new_async(mss, opts).await?) as Box<dyn AsyncFormatReader>)
-        }
-        .boxed()
+        async { Ok(Box::new(try_new_async(mss, opts).await?) as Box<dyn AsyncFormatReader>) }
+            .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
