@@ -5,6 +5,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use symphonia_core::codecs::video::well_known::extra_data::{
@@ -13,7 +14,7 @@ use symphonia_core::codecs::video::well_known::extra_data::{
 use symphonia_core::codecs::video::VideoExtraData;
 use symphonia_core::errors::{Error, Result};
 use symphonia_core::formats::TrackFlags;
-use symphonia_core::io::{BufReader, ReadBytes};
+use symphonia_core::io::{BufReader, MediaSourceStream};
 use symphonia_core::meta::{
     Chapter, ChapterGroup, ChapterGroupItem, MetadataBuilder, MetadataRevision, RawTag,
     RawTagSubField, RawValue, StandardTag, Tag,
@@ -21,7 +22,7 @@ use symphonia_core::meta::{
 use symphonia_core::units::Time;
 
 use crate::ebml::{
-    read_unsigned_vint, Element, ElementData, ElementHeader, ElementIterator, ElementReader,
+    read_unsigned_vint, Element, ElementData, ElementHeader, ElementIterator,
 };
 use crate::element_ids::ElementType;
 use crate::lacing::calc_abs_block_timestamp;
@@ -45,7 +46,7 @@ pub(crate) struct TrackElement {
 impl Element for TrackElement {
     const ID: ElementType = ElementType::TrackEntry;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut number = None;
         let mut uid = None;
         let mut language = None;
@@ -57,10 +58,10 @@ impl Element for TrackElement {
         let mut default_duration = None;
         let mut flags = Default::default();
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::TrackNumber => {
-                    number = Some(it.read_u64()?);
+                    number = Some(it.read_u64().await?);
                 }
                 ElementType::TrackUid => {
                     uid = Some(it.read_u64()?);
@@ -154,7 +155,7 @@ pub(crate) struct AudioElement {
 impl Element for AudioElement {
     const ID: ElementType = ElementType::Audio;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut sampling_frequency = None;
         let mut output_sampling_frequency = None;
         let mut channels = None;
@@ -199,7 +200,7 @@ pub(crate) struct VideoElement {
 impl Element for VideoElement {
     const ID: ElementType = ElementType::Video;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut pixel_width = None;
         let mut pixel_height = None;
 
@@ -229,7 +230,7 @@ pub(crate) struct BlockAdditionMappingElement {
 impl Element for BlockAdditionMappingElement {
     const ID: ElementType = ElementType::BlockAdditionMapping;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         // There can be many BlockAdditionMapping elements with DolbyVisionConfiguration in a single track
         // BlockAddIdType FourCC string allows to determine the type of DolbyVisionConfiguration extra data
         let mut extra_data = None;
@@ -273,7 +274,7 @@ pub(crate) struct SeekHeadElement {
 impl Element for SeekHeadElement {
     const ID: ElementType = ElementType::SeekHead;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut seeks = Vec::new();
 
         while let Some(header) = it.read_header()? {
@@ -300,7 +301,7 @@ pub(crate) struct SeekElement {
 impl Element for SeekElement {
     const ID: ElementType = ElementType::Seek;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut seek_id = None;
         let mut seek_position = None;
 
@@ -333,7 +334,7 @@ pub(crate) struct TracksElement {
 impl Element for TracksElement {
     const ID: ElementType = ElementType::Tracks;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         Ok(Self { tracks: it.read_elements()? })
     }
 }
@@ -353,7 +354,7 @@ pub(crate) struct EbmlHeaderElement {
 impl Element for EbmlHeaderElement {
     const ID: ElementType = ElementType::Ebml;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut version = None;
         let mut read_version = None;
         let mut max_id_length = None;
@@ -416,7 +417,7 @@ pub(crate) struct InfoElement {
 impl Element for InfoElement {
     const ID: ElementType = ElementType::Info;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut duration = None;
         let mut timestamp_scale = None;
         let mut title = None;
@@ -465,7 +466,7 @@ pub(crate) struct CuesElement {
 impl Element for CuesElement {
     const ID: ElementType = ElementType::Cues;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         Ok(Self { points: it.read_elements()? })
     }
 }
@@ -480,7 +481,7 @@ pub(crate) struct CuePointElement {
 impl Element for CuePointElement {
     const ID: ElementType = ElementType::CuePoint;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut time = None;
         let mut pos = None;
         while let Some(header) = it.read_header()? {
@@ -512,7 +513,7 @@ pub(crate) struct CueTrackPositionsElement {
 impl Element for CueTrackPositionsElement {
     const ID: ElementType = ElementType::CueTrackPositions;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut track = None;
         let mut pos = None;
         while let Some(header) = it.read_header()? {
@@ -545,7 +546,7 @@ pub(crate) struct BlockGroupElement {
 impl Element for BlockGroupElement {
     const ID: ElementType = ElementType::BlockGroup;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut data = None;
         let mut block_duration = None;
         while let Some(header) = it.read_header()? {
@@ -589,7 +590,7 @@ pub(crate) struct ClusterElement {
 impl Element for ClusterElement {
     const ID: ElementType = ElementType::Cluster;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, header: ElementHeader) -> Result<Self> {
         let pos = it.pos();
         let mut timestamp = None;
         let mut blocks = Vec::new();
@@ -644,7 +645,7 @@ pub(crate) struct TagsElement {
 impl Element for TagsElement {
     const ID: ElementType = ElementType::Tags;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut tags = Vec::new();
 
         while let Some(header) = it.read_header()? {
@@ -688,7 +689,7 @@ pub(crate) struct TagElement {
 impl Element for TagElement {
     const ID: ElementType = ElementType::Tag;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut simple_tags = Vec::new();
 
         while let Some(header) = it.read_header()? {
@@ -715,7 +716,7 @@ pub(crate) struct SimpleTagElement {
 impl Element for SimpleTagElement {
     const ID: ElementType = ElementType::SimpleTag;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut name = None;
         let mut value = None;
 
@@ -751,7 +752,7 @@ pub(crate) struct AttachedFileElement {
 impl Element for AttachedFileElement {
     const ID: ElementType = ElementType::AttachedFile;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut name = None;
         let mut desc = None;
         let mut media_type = None;
@@ -798,7 +799,7 @@ pub(crate) struct AttachmentsElement {
 impl Element for AttachmentsElement {
     const ID: ElementType = ElementType::Attachments;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut attached_files = Vec::new();
 
         while let Some(header) = it.read_header()? {
@@ -824,7 +825,7 @@ pub(crate) struct ChaptersElement {
 impl Element for ChaptersElement {
     const ID: ElementType = ElementType::Chapters;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut editions = Vec::new();
 
         while let Some(header) = it.read_header()? {
@@ -855,7 +856,7 @@ pub(crate) struct EditionEntryElement {
 impl Element for EditionEntryElement {
     const ID: ElementType = ElementType::EditionEntry;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut is_hidden = false;
         let mut is_default = false;
         let mut is_ordered = false;
@@ -945,7 +946,7 @@ pub(crate) struct EditionDisplayElement {
 impl Element for EditionDisplayElement {
     const ID: ElementType = ElementType::EditionDisplay;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut name = None;
         let mut lang_bcp47 = None;
 
@@ -985,7 +986,7 @@ pub(crate) struct ChapterAtomElement {
 impl Element for ChapterAtomElement {
     const ID: ElementType = ElementType::ChapterAtom;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut is_enabled = false;
         let mut is_hidden = false;
         let mut time_start = None;
@@ -1137,7 +1138,7 @@ pub(crate) struct ChapterDisplayElement {
 impl Element for ChapterDisplayElement {
     const ID: ElementType = ElementType::ChapterDisplay;
 
-    fn read<R: ElementReader>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
         let mut name = None;
         let mut lang = None;
         let mut lang_bcp47 = None;

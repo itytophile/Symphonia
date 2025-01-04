@@ -9,6 +9,7 @@ use extra_data::{
     VIDEO_EXTRA_DATA_ID_AV1_DECODER_CONFIG, VIDEO_EXTRA_DATA_ID_AVC_DECODER_CONFIG,
     VIDEO_EXTRA_DATA_ID_HEVC_DECODER_CONFIG, VIDEO_EXTRA_DATA_ID_VP9_DECODER_CONFIG,
 };
+use futures_util::FutureExt;
 use log::warn;
 
 use symphonia_common::mpeg::video::{
@@ -25,7 +26,7 @@ use symphonia_core::codecs::video::{
 };
 use symphonia_core::codecs::{CodecId, CodecParameters, CodecProfile};
 use symphonia_core::errors::{decode_error, Error, Result};
-use symphonia_core::io::{BufReader, ReadBytes};
+use symphonia_core::io::BufReader;
 
 use crate::lacing::read_xiph_sizes;
 use crate::segment::TrackElement;
@@ -220,7 +221,7 @@ fn flac_extra_data_from_codec_private(codec_private: &[u8]) -> Result<Box<[u8]>>
         return decode_error("mkv (flac): missing flac stream marker");
     }
 
-    let header = MetadataBlockHeader::read(&mut reader)?;
+    let header = MetadataBlockHeader::read(&mut reader).now_or_never().unwrap()?;
 
     loop {
         match header.block_type {

@@ -185,7 +185,7 @@ pub mod default {
         #[cfg(feature = "isomp4")]
         pub use symphonia_format_isomp4::AsyncIsoMp4Reader;
         #[cfg(feature = "mkv")]
-        pub use symphonia_format_mkv::MkvReader;
+        pub use symphonia_format_mkv::AsyncMkvReader;
         #[cfg(feature = "ogg")]
         pub use symphonia_format_ogg::AsyncOggReader;
         #[cfg(feature = "aiff")]
@@ -312,7 +312,7 @@ pub mod default {
         probe.register_format::<formats::AsyncOggReader<'_>>();
 
         #[cfg(feature = "mkv")]
-        probe.register_format::<formats::MkvReader<'_>>();
+        probe.register_format::<formats::AsyncMkvReader<'_>>();
 
         // Metadata
         #[cfg(feature = "ape")]
