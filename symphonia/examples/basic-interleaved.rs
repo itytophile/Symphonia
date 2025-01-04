@@ -9,7 +9,7 @@ use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia_core::formats::TrackType;
+use symphonia_core::formats::{FormatReader, FormatReaderInfo, TrackType};
 
 fn main() {
     // Get command line arguments.
@@ -17,10 +17,10 @@ fn main() {
 
     // Create a media source. Note that the MediaSource trait is automatically implemented for File,
     // among other types.
-    let file = Box::new(File::open(Path::new(&args[1])).unwrap());
+    let file = File::open(Path::new(&args[1])).unwrap();
 
     // Create the media source stream using the boxed media source from above.
-    let mss = MediaSourceStream::new(file, Default::default());
+    let mss = MediaSourceStream::new_blocking(file, Default::default());
 
     // Create a hint to help the format registry guess what format reader is appropriate. In this
     // example we'll leave it empty.
@@ -33,7 +33,7 @@ fn main() {
 
     // Probe the media source stream for a format.
     let mut format =
-        symphonia::default::get_probe().probe(&hint, mss, fmt_opts, meta_opts).unwrap();
+        symphonia::default::get_probe().probe_blocking(&hint, mss, fmt_opts, meta_opts).unwrap();
 
     // Get the default audio track.
     let track = format.default_track(TrackType::Audio).unwrap();
