@@ -609,16 +609,15 @@ async fn read_variable_length_integer(reader: &mut MediaSourceStream<'_>) -> Res
 
 #[cfg(test)]
 mod tests {
+    use futures_util::FutureExt;
+
     use super::*;
 
     fn variable_length_integer_test(bytes: &[u8], expected: u64) -> Result<()> {
         let cursor = futures_util::io::Cursor::new(Vec::from(bytes));
         let mut source = MediaSourceStream::new(Box::pin(cursor), Default::default());
 
-        assert_eq!(
-            futures_executor::block_on(read_variable_length_integer(&mut source))?,
-            expected
-        );
+        assert_eq!(read_variable_length_integer(&mut source).now_or_never().unwrap()?, expected);
 
         Ok(())
     }
@@ -643,6 +642,6 @@ mod tests {
         ]);
         let mut source = MediaSourceStream::new(Box::pin(cursor), Default::default());
 
-        assert!(futures_executor::block_on(read_variable_length_integer(&mut source)).is_err());
+        assert!(read_variable_length_integer(&mut source).now_or_never().unwrap().is_err());
     }
 }

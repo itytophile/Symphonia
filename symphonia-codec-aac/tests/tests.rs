@@ -1,3 +1,4 @@
+use futures_util::FutureExt;
 use symphonia_codec_aac::{AacDecoder, AdtsReader};
 use symphonia_core::codecs::audio::{
     well_known::CODEC_ID_AAC, AudioCodecParameters, AudioDecoder, AudioDecoderOptions,
@@ -31,7 +32,7 @@ fn invalid_channels_aac() {
         0xaf,
     ];
 
-    let err = futures_executor::block_on(test_decode(file)).unwrap_err();
+    let err = test_decode(file).now_or_never().unwrap().unwrap_err();
 
     assert!(matches!(err, errors::Error::Unsupported(_)));
 }

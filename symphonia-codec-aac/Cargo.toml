@@ -17,6 +17,3 @@ log = "0.4"
 lazy_static = "1.4.0"
 symphonia-core = { version = "0.5.4", path = "../symphonia-core" }
 futures-util = "0.3"
-
-[dev-dependencies]
-futures-executor = "0.3"

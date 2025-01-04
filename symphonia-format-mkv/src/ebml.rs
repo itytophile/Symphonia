@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn element_tag_parsing() {
-        futures_executor::block_on(async {
+        async {
             assert_eq!(read_tag(BufReader::new(&[0x82])).await.unwrap(), (0x82, 1, false));
             assert_eq!(read_tag(BufReader::new(&[0x40, 0x02])).await.unwrap(), (0x4002, 2, false));
             assert_eq!(
@@ -122,12 +122,14 @@ mod tests {
                 read_tag(BufReader::new(&[0x10, 0x00, 0x00, 0x02])).await.unwrap(),
                 (0x10000002, 4, false)
             );
-        })
+        }
+        .now_or_never()
+        .unwrap()
     }
 
     #[test]
     fn variable_unsigned_integer_parsing() {
-        futures_executor::block_on(async {
+        async {
             assert_eq!(read_unsigned_vint(BufReader::new(&[0x82])).await.unwrap(), 2);
             assert_eq!(read_unsigned_vint(BufReader::new(&[0x40, 0x02])).await.unwrap(), 2);
             assert_eq!(read_unsigned_vint(BufReader::new(&[0x20, 0x00, 0x02])).await.unwrap(), 2);
@@ -159,7 +161,9 @@ mod tests {
                 .unwrap(),
                 2
             );
-        });
+        }
+        .now_or_never()
+        .unwrap();
     }
 
     #[test]

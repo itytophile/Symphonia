@@ -509,7 +509,7 @@ mod tests {
         // ignore an odd number of bytes.
         let mut buf = &data[..];
 
-        futures_executor::block_on(async {
+        async {
             // 96k single byte reads.
             for byte in &buf[..96 * 1024] {
                 assert_eq!(*byte, mss.read_byte().await.unwrap());
@@ -541,7 +541,9 @@ mod tests {
             for bytes in buf[..4 * 24 * 1024].chunks_exact(4) {
                 assert_eq!(bytes, &mss.read_quad_bytes().await.unwrap());
             }
-        })
+        }
+        .now_or_never()
+        .unwrap()
     }
 
     struct DumbRead<'s>(MediaSourceStream<'s>);
@@ -578,7 +580,7 @@ mod tests {
         assert_eq!(mss.read_buffer_len(), 0);
         assert_eq!(mss.unread_buffer_len(), 0);
 
-        futures_executor::block_on(async {
+        async {
             mss.ignore_bytes(5122).await.unwrap();
 
             assert_eq!(5122, mss.pos());
@@ -597,7 +599,9 @@ mod tests {
             assert_eq!(mss.read_buffer_len(), 5122);
 
             assert_eq!(upper, mss.read_byte().await.unwrap());
-        })
+        }
+        .now_or_never()
+        .unwrap()
     }
 
     #[test]
@@ -609,7 +613,7 @@ mod tests {
             Default::default(),
         );
 
-        futures_executor::block_on(async {
+        async {
             // For slightly cleaner floats
             mss.ignore_bytes(2).await.unwrap();
 
@@ -620,7 +624,9 @@ mod tests {
             assert_eq!(mss.read_be_u24().await.unwrap(), 6739677);
             assert_eq!(mss.read_be_u32().await.unwrap(), 1569552917);
             assert_eq!(mss.read_be_u64().await.unwrap(), 6091217585348000864);
-        })
+        }
+        .now_or_never()
+        .unwrap()
     }
 
     #[test]
@@ -632,7 +638,7 @@ mod tests {
             Default::default(),
         );
 
-        futures_executor::block_on(async {
+        async {
             mss.ignore_bytes(1024).await.unwrap();
 
             assert_eq!(mss.read_f32().await.unwrap(), -0.00000000000000000000000000048426285);
@@ -642,6 +648,8 @@ mod tests {
             assert_eq!(mss.read_u24().await.unwrap(), 6710386);
             assert_eq!(mss.read_u32().await.unwrap(), 2378776723);
             assert_eq!(mss.read_u64().await.unwrap(), 5170196279331153683);
-        })
+        }
+        .now_or_never()
+        .unwrap()
     }
 }

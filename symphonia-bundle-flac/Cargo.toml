@@ -26,6 +26,3 @@ features = ["flac"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
-
-[dev-dependencies]
-futures-executor = "0.3.31"

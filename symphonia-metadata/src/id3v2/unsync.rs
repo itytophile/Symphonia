@@ -192,12 +192,13 @@ impl<B: ReadBytes + FiniteStream> ReadBytes for UnsyncStream<B> {
 #[cfg(test)]
 mod tests {
     use super::read_syncsafe_leq32;
+    use futures_util::FutureExt;
     use symphonia_core::io::BufReader;
 
     #[test]
     fn verify_read_syncsafe_leq32() {
         let mut stream = BufReader::new(&[3, 4, 80, 1, 15]);
-        futures_executor::block_on(async {
+        async {
             assert_eq!(101875743, read_syncsafe_leq32(&mut stream, 32).await.unwrap());
 
             // Special case: for a bit depth that is not a multiple of 7 such as 32
@@ -212,6 +213,8 @@ mod tests {
 
             let mut stream = BufReader::new(&[3, 4, 80, 1]);
             assert_eq!(0, read_syncsafe_leq32(&mut stream, 0).await.unwrap());
-        });
+        }
+        .now_or_never()
+        .unwrap();
     }
 }

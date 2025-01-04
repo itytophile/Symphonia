@@ -311,6 +311,7 @@ async fn utf8_decode_be_u64<B: ReadBytes>(src: &mut B) -> Result<Option<u64>> {
 #[cfg(test)]
 mod tests {
     use super::utf8_decode_be_u64;
+    use futures_util::FutureExt;
     use symphonia_core::io::BufReader;
 
     #[test]
@@ -320,7 +321,7 @@ mod tests {
             0xac, 0xf0, 0x90, 0x8d, 0x88, 0xff, 0x80, 0xbf, //
         ]);
 
-        futures_executor::block_on(async {
+        async {
             assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), Some(36));
             assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), Some(162));
             assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), Some(2361));
@@ -329,6 +330,8 @@ mod tests {
             assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), None);
             assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), None);
             assert_eq!(utf8_decode_be_u64(&mut stream).await.unwrap(), None);
-        });
+        }
+        .now_or_never()
+        .unwrap();
     }
 }
