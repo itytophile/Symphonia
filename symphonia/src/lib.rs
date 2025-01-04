@@ -175,27 +175,23 @@ pub mod default {
         //! The `formats` module re-exports all enabled Symphonia format readers.
 
         #[cfg(feature = "flac")]
-        pub use symphonia_bundle_flac::AsyncFlacReader;
+        pub use symphonia_bundle_flac as flac;
         #[cfg(any(feature = "mp1", feature = "mp2", feature = "mp3"))]
-        pub use symphonia_bundle_mp3::MpaReader;
+        pub use symphonia_bundle_mp3 as mpa;
         #[cfg(feature = "aac")]
-        pub use symphonia_codec_aac::AdtsReader;
+        pub use symphonia_codec_aac as aac;
         #[cfg(feature = "caf")]
-        pub use symphonia_format_caf::CafReader;
+        pub use symphonia_format_caf as caf;
         #[cfg(feature = "isomp4")]
-        pub use symphonia_format_isomp4::AsyncIsoMp4Reader;
+        pub use symphonia_format_isomp4 as isomp4;
         #[cfg(feature = "mkv")]
-        pub use symphonia_format_mkv::AsyncMkvReader;
+        pub use symphonia_format_mkv as mkv;
         #[cfg(feature = "ogg")]
-        pub use symphonia_format_ogg::AsyncOggReader;
+        pub use symphonia_format_ogg as ogg;
         #[cfg(feature = "aiff")]
-        pub use symphonia_format_riff::AsyncAiffReader;
+        pub use symphonia_format_riff::aiff;
         #[cfg(feature = "wav")]
-        pub use symphonia_format_riff::AsyncWavReader;
-
-        #[deprecated = "use `default::formats::MpaReader` instead"]
-        #[cfg(any(feature = "mp1", feature = "mp2", feature = "mp3"))]
-        pub type Mp3Reader<'s> = MpaReader<'s>;
+        pub use symphonia_format_riff::wave;
     }
 
     pub mod meta {
@@ -288,31 +284,31 @@ pub mod default {
     pub fn register_enabled_formats(probe: &mut Probe) {
         // Formats
         #[cfg(feature = "aac")]
-        probe.register_format::<formats::AdtsReader<'_>>();
+        probe.register_format::<formats::aac::AsyncAdtsReader<'_>>();
 
         #[cfg(feature = "caf")]
-        probe.register_format::<formats::CafReader<'_>>();
+        probe.register_format::<formats::caf::AsyncCafReader<'_>>();
 
         #[cfg(feature = "flac")]
-        probe.register_format::<formats::AsyncFlacReader<'_>>();
+        probe.register_format::<formats::flac::AsyncFlacReader<'_>>();
 
         #[cfg(feature = "isomp4")]
-        probe.register_format::<formats::AsyncIsoMp4Reader<'_>>();
+        probe.register_format::<formats::isomp4::AsyncIsoMp4Reader<'_>>();
 
         #[cfg(any(feature = "mp1", feature = "mp2", feature = "mp3"))]
-        probe.register_format::<formats::MpaReader<'_>>();
+        probe.register_format::<formats::mpa::AsyncMpaReader<'_>>();
 
         #[cfg(feature = "aiff")]
-        probe.register_format::<formats::AsyncAiffReader<'_>>();
+        probe.register_format::<formats::aiff::AsyncAiffReader<'_>>();
 
         #[cfg(feature = "wav")]
-        probe.register_format::<formats::AsyncWavReader<'_>>();
+        probe.register_format::<formats::wave::AsyncWavReader<'_>>();
 
         #[cfg(feature = "ogg")]
-        probe.register_format::<formats::AsyncOggReader<'_>>();
+        probe.register_format::<formats::ogg::AsyncOggReader<'_>>();
 
         #[cfg(feature = "mkv")]
-        probe.register_format::<formats::AsyncMkvReader<'_>>();
+        probe.register_format::<formats::mkv::AsyncMkvReader<'_>>();
 
         // Metadata
         #[cfg(feature = "ape")]
