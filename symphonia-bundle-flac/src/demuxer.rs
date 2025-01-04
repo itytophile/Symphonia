@@ -56,154 +56,158 @@ pub struct AsyncFlacReader<'s> {
 
 pub type FlacReader<'s> = BlockingFormatReader<AsyncFlacReader<'s>>;
 
-impl<'s> AsyncFlacReader<'s> {
-    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
-        // Read the first 4 bytes of the stream. Ideally this will be the FLAC stream marker.
-        let marker = mss.read_quad_bytes().await?;
+pub fn try_new(mss: MediaSourceStream<'_>, opts: FormatOptions) -> Result<FlacReader<'_>> {
+    Ok(BlockingFormatReader::new(try_new_async(mss.into_inner(), opts).now_or_never().unwrap()?))
+}
 
-        if marker != FLAC_STREAM_MARKER {
-            return unsupported_error("flac: missing flac stream marker");
-        }
+pub async fn try_new_async(
+    mut mss: AsyncMediaSourceStream<'_>,
+    opts: FormatOptions,
+) -> Result<AsyncFlacReader<'_>> {
+    // Read the first 4 bytes of the stream. Ideally this will be the FLAC stream marker.
+    let marker = mss.read_quad_bytes().await?;
 
-        // Strictly speaking, the first metadata block must be a StreamInfo block. There is
-        // no technical need for this from the reader's point of view. Additionally, if the
-        // reader is fed a stream mid-way there is no StreamInfo block. Therefore, just read
-        // all metadata blocks and handle the StreamInfo block as it comes.
-        let flac = AsyncFlacReader::init_with_metadata(mss, opts).await?;
-
-        // Make sure that there is atleast one StreamInfo block.
-        if flac.tracks.is_empty() {
-            return decode_error("flac: no stream info block");
-        }
-
-        Ok(flac)
+    if marker != FLAC_STREAM_MARKER {
+        return unsupported_error("flac: missing flac stream marker");
     }
 
-    /// Reads all the metadata blocks, returning a fully populated `FlacReader`.
-    async fn init_with_metadata(
-        mss: AsyncMediaSourceStream<'s>,
-        opts: FormatOptions,
-    ) -> Result<Self> {
-        let mut metadata_builder = MetadataBuilder::new();
+    // Strictly speaking, the first metadata block must be a StreamInfo block. There is
+    // no technical need for this from the reader's point of view. Additionally, if the
+    // reader is fed a stream mid-way there is no StreamInfo block. Therefore, just read
+    // all metadata blocks and handle the StreamInfo block as it comes.
+    let flac = init_with_metadata(mss, opts).await?;
 
-        let mut reader = mss;
-        let mut track = None;
-        let mut attachments = Vec::new();
-        let mut chapters = None;
-        let mut index = None;
-        let mut parser = Default::default();
+    // Make sure that there is atleast one StreamInfo block.
+    if flac.tracks.is_empty() {
+        return decode_error("flac: no stream info block");
+    }
 
-        loop {
-            let header = MetadataBlockHeader::read(&mut reader).await?;
+    Ok(flac)
+}
 
-            // Create a scoped bytestream to error if the metadata block read functions exceed the
-            // stated length of the block.
-            let mut block_stream = ScopedStream::new(&mut reader, u64::from(header.block_len));
+/// Reads all the metadata blocks, returning a fully populated `FlacReader`.
+async fn init_with_metadata(
+    mss: AsyncMediaSourceStream<'_>,
+    opts: FormatOptions,
+) -> Result<AsyncFlacReader<'_>> {
+    let mut metadata_builder = MetadataBuilder::new();
 
-            match header.block_type {
-                // The StreamInfo block is parsed into a track.
-                MetadataBlockType::StreamInfo => {
-                    // Only a single stream information block is allowed.
-                    if track.is_none() {
-                        track = Some(read_stream_info_block(&mut block_stream, &mut parser).await?);
-                    }
-                    else {
-                        return decode_error("flac: found more than one stream info block");
-                    }
+    let mut reader = mss;
+    let mut track = None;
+    let mut attachments = Vec::new();
+    let mut chapters = None;
+    let mut index = None;
+    let mut parser = Default::default();
+
+    loop {
+        let header = MetadataBlockHeader::read(&mut reader).await?;
+
+        // Create a scoped bytestream to error if the metadata block read functions exceed the
+        // stated length of the block.
+        let mut block_stream = ScopedStream::new(&mut reader, u64::from(header.block_len));
+
+        match header.block_type {
+            // The StreamInfo block is parsed into a track.
+            MetadataBlockType::StreamInfo => {
+                // Only a single stream information block is allowed.
+                if track.is_none() {
+                    track = Some(read_stream_info_block(&mut block_stream, &mut parser).await?);
                 }
-                MetadataBlockType::Application => {
-                    let vendor_data =
-                        read_flac_application_block(&mut block_stream, header.block_len).await?;
-                    attachments.push(Attachment::VendorData(vendor_data));
-                }
-                // SeekTable blocks are parsed into a SeekIndex.
-                MetadataBlockType::SeekTable => {
-                    // Only a single seek table block is allowed.
-                    if index.is_none() {
-                        index = Some(
-                            read_flac_seektable_block(&mut block_stream, header.block_len).await?,
-                        );
-                    }
-                    else {
-                        return decode_error("flac: found more than one seek table block");
-                    }
-                }
-                // VorbisComment blocks are parsed into Tags.
-                MetadataBlockType::VorbisComment => {
-                    read_flac_comment_block(&mut block_stream, &mut metadata_builder).await?;
-                }
-                // Cuesheet blocks are parsed into Cues.
-                MetadataBlockType::Cuesheet => {
-                    // A cuesheet block must appear before the stream information block so that the
-                    // timebase is known to calculate the cue times. This should always be the case
-                    // since the stream information block must always be the first metadata block.
-                    if let Some(tb) = track.as_ref().and_then(|track| track.time_base) {
-                        chapters = Some(read_flac_cuesheet_block(&mut block_stream, tb).await?);
-                    }
-                    else {
-                        return decode_error("flac: cuesheet block before stream info");
-                    }
-                }
-                // Picture blocks are read as Visuals.
-                MetadataBlockType::Picture => {
-                    metadata_builder.add_visual(read_flac_picture_block(&mut block_stream).await?);
-                }
-                // Padding blocks are skipped.
-                MetadataBlockType::Padding => {
-                    block_stream.ignore_bytes(u64::from(header.block_len)).await?;
-                }
-                // Unknown block encountered. Skip these blocks as they may be part of a future
-                // version of FLAC, but  print a message.
-                MetadataBlockType::Unknown(id) => {
-                    block_stream.ignore_bytes(u64::from(header.block_len)).await?;
-                    info!("ignoring {} bytes of block width id={}.", header.block_len, id);
+                else {
+                    return decode_error("flac: found more than one stream info block");
                 }
             }
-
-            // If the stated block length is longer than the number of bytes from the block read,
-            // ignore the remaining unread data.
-            let block_unread_len = block_stream.bytes_available();
-
-            if block_unread_len > 0 {
-                info!("under read block by {} bytes.", block_unread_len);
-                block_stream.ignore_bytes(block_unread_len).await?;
+            MetadataBlockType::Application => {
+                let vendor_data =
+                    read_flac_application_block(&mut block_stream, header.block_len).await?;
+                attachments.push(Attachment::VendorData(vendor_data));
             }
-
-            // Exit when the last header is read.
-            if header.is_last {
-                break;
+            // SeekTable blocks are parsed into a SeekIndex.
+            MetadataBlockType::SeekTable => {
+                // Only a single seek table block is allowed.
+                if index.is_none() {
+                    index =
+                        Some(read_flac_seektable_block(&mut block_stream, header.block_len).await?);
+                }
+                else {
+                    return decode_error("flac: found more than one seek table block");
+                }
+            }
+            // VorbisComment blocks are parsed into Tags.
+            MetadataBlockType::VorbisComment => {
+                read_flac_comment_block(&mut block_stream, &mut metadata_builder).await?;
+            }
+            // Cuesheet blocks are parsed into Cues.
+            MetadataBlockType::Cuesheet => {
+                // A cuesheet block must appear before the stream information block so that the
+                // timebase is known to calculate the cue times. This should always be the case
+                // since the stream information block must always be the first metadata block.
+                if let Some(tb) = track.as_ref().and_then(|track| track.time_base) {
+                    chapters = Some(read_flac_cuesheet_block(&mut block_stream, tb).await?);
+                }
+                else {
+                    return decode_error("flac: cuesheet block before stream info");
+                }
+            }
+            // Picture blocks are read as Visuals.
+            MetadataBlockType::Picture => {
+                metadata_builder.add_visual(read_flac_picture_block(&mut block_stream).await?);
+            }
+            // Padding blocks are skipped.
+            MetadataBlockType::Padding => {
+                block_stream.ignore_bytes(u64::from(header.block_len)).await?;
+            }
+            // Unknown block encountered. Skip these blocks as they may be part of a future
+            // version of FLAC, but  print a message.
+            MetadataBlockType::Unknown(id) => {
+                block_stream.ignore_bytes(u64::from(header.block_len)).await?;
+                info!("ignoring {} bytes of block width id={}.", header.block_len, id);
             }
         }
 
-        // A single stream information block is mandatory. So it is an error for track to be `None`
-        // after iterating over all metadata blocks.
-        let tracks = match track {
-            Some(track) => vec![track],
-            _ => return decode_error("flac: missing stream info block"),
-        };
+        // If the stated block length is longer than the number of bytes from the block read,
+        // ignore the remaining unread data.
+        let block_unread_len = block_stream.bytes_available();
 
-        // Commit any read metadata to the metadata log.
-        let mut metadata = opts.external_data.metadata.unwrap_or_default();
-        metadata.push(metadata_builder.metadata());
+        if block_unread_len > 0 {
+            info!("under read block by {} bytes.", block_unread_len);
+            block_stream.ignore_bytes(block_unread_len).await?;
+        }
 
-        // Synchronize the packet parser to the first audio frame.
-        let _ = parser.resync(&mut reader).await?;
-
-        // The first frame offset is the byte offset from the beginning of the stream after all the
-        // metadata blocks have been read.
-        let first_frame_offset = reader.pos();
-
-        Ok(AsyncFlacReader {
-            reader,
-            tracks,
-            attachments,
-            chapters,
-            metadata,
-            index,
-            first_frame_offset,
-            parser,
-        })
+        // Exit when the last header is read.
+        if header.is_last {
+            break;
+        }
     }
+
+    // A single stream information block is mandatory. So it is an error for track to be `None`
+    // after iterating over all metadata blocks.
+    let tracks = match track {
+        Some(track) => vec![track],
+        _ => return decode_error("flac: missing stream info block"),
+    };
+
+    // Commit any read metadata to the metadata log.
+    let mut metadata = opts.external_data.metadata.unwrap_or_default();
+    metadata.push(metadata_builder.metadata());
+
+    // Synchronize the packet parser to the first audio frame.
+    let _ = parser.resync(&mut reader).await?;
+
+    // The first frame offset is the byte offset from the beginning of the stream after all the
+    // metadata blocks have been read.
+    let first_frame_offset = reader.pos();
+
+    Ok(AsyncFlacReader {
+        reader,
+        tracks,
+        attachments,
+        chapters,
+        metadata,
+        index,
+        first_frame_offset,
+        parser,
+    })
 }
 
 impl Scoreable for AsyncFlacReader<'_> {
@@ -219,10 +223,8 @@ impl<'s> ProbeableFormat<'s> for AsyncFlacReader<'_> {
         mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
-        async move {
-            Ok(Box::new(AsyncFlacReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
-        }
-        .boxed()
+        async move { Ok(Box::new(try_new_async(mss, opts).await?) as Box<dyn AsyncFormatReader>) }
+            .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {

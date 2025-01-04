@@ -86,6 +86,8 @@ impl<'s> MediaSourceStream<'s> {
         ))
     }
 
+    /// Consumes `self` and returns the inner `AsyncMediaSourceStream`. The returned `AsyncMediaSourceStream` isn't really async
+    /// so it should be used with care.
     pub fn into_inner(self) -> AsyncMediaSourceStream<'s> {
         self.0
     }

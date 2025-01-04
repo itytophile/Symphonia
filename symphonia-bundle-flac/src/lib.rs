@@ -21,4 +21,4 @@ mod parser;
 mod validate;
 
 pub use decoder::FlacDecoder;
-pub use demuxer::{AsyncFlacReader, FlacReader};
+pub use demuxer::{try_new, try_new_async, AsyncFlacReader, FlacReader};
