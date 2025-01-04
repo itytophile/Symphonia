@@ -21,7 +21,7 @@ use symphonia_core::meta::{
 use symphonia_core::units::Time;
 
 use crate::ebml::{
-    read_unsigned_vint, Element, ElementData, ElementHeader, ElementIterator, ElementReader,
+    read_unsigned_vint, Element, ElementData, ElementHeader, ElementIterator, 
 };
 use crate::element_ids::ElementType;
 use crate::lacing::calc_abs_block_timestamp;
@@ -45,8 +45,8 @@ pub(crate) struct TrackElement {
 impl Element for TrackElement {
     const ID: ElementType = ElementType::TrackEntry;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut number = None;
@@ -157,8 +157,8 @@ pub(crate) struct AudioElement {
 impl Element for AudioElement {
     const ID: ElementType = ElementType::Audio;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut sampling_frequency = None;
@@ -205,8 +205,8 @@ pub(crate) struct VideoElement {
 impl Element for VideoElement {
     const ID: ElementType = ElementType::Video;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut pixel_width = None;
@@ -238,8 +238,8 @@ pub(crate) struct BlockAdditionMappingElement {
 impl Element for BlockAdditionMappingElement {
     const ID: ElementType = ElementType::BlockAdditionMapping;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         // There can be many BlockAdditionMapping elements with DolbyVisionConfiguration in a single track
@@ -285,8 +285,8 @@ pub(crate) struct SeekHeadElement {
 impl Element for SeekHeadElement {
     const ID: ElementType = ElementType::SeekHead;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut seeks = Vec::new();
@@ -315,8 +315,8 @@ pub(crate) struct SeekElement {
 impl Element for SeekElement {
     const ID: ElementType = ElementType::Seek;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut seek_id = None;
@@ -351,8 +351,8 @@ pub(crate) struct TracksElement {
 impl Element for TracksElement {
     const ID: ElementType = ElementType::Tracks;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         Ok(Self { tracks: it.read_elements().await? })
@@ -374,8 +374,8 @@ pub(crate) struct EbmlHeaderElement {
 impl Element for EbmlHeaderElement {
     const ID: ElementType = ElementType::Ebml;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut version = None;
@@ -440,8 +440,8 @@ pub(crate) struct InfoElement {
 impl Element for InfoElement {
     const ID: ElementType = ElementType::Info;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut duration = None;
@@ -492,8 +492,8 @@ pub(crate) struct CuesElement {
 impl Element for CuesElement {
     const ID: ElementType = ElementType::Cues;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         Ok(Self { points: it.read_elements().await? })
@@ -510,8 +510,8 @@ pub(crate) struct CuePointElement {
 impl Element for CuePointElement {
     const ID: ElementType = ElementType::CuePoint;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut time = None;
@@ -545,8 +545,8 @@ pub(crate) struct CueTrackPositionsElement {
 impl Element for CueTrackPositionsElement {
     const ID: ElementType = ElementType::CueTrackPositions;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut track = None;
@@ -581,8 +581,8 @@ pub(crate) struct BlockGroupElement {
 impl Element for BlockGroupElement {
     const ID: ElementType = ElementType::BlockGroup;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut data = None;
@@ -628,8 +628,8 @@ pub(crate) struct ClusterElement {
 impl Element for ClusterElement {
     const ID: ElementType = ElementType::Cluster;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         header: ElementHeader,
     ) -> Result<Self> {
         let pos = it.pos();
@@ -688,8 +688,8 @@ pub(crate) struct TagsElement {
 impl Element for TagsElement {
     const ID: ElementType = ElementType::Tags;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut tags = Vec::new();
@@ -735,8 +735,8 @@ pub(crate) struct TagElement {
 impl Element for TagElement {
     const ID: ElementType = ElementType::Tag;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut simple_tags = Vec::new();
@@ -765,8 +765,8 @@ pub(crate) struct SimpleTagElement {
 impl Element for SimpleTagElement {
     const ID: ElementType = ElementType::SimpleTag;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut name = None;
@@ -804,8 +804,8 @@ pub(crate) struct AttachedFileElement {
 impl Element for AttachedFileElement {
     const ID: ElementType = ElementType::AttachedFile;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut name = None;
@@ -854,8 +854,8 @@ pub(crate) struct AttachmentsElement {
 impl Element for AttachmentsElement {
     const ID: ElementType = ElementType::Attachments;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut attached_files = Vec::new();
@@ -883,8 +883,8 @@ pub(crate) struct ChaptersElement {
 impl Element for ChaptersElement {
     const ID: ElementType = ElementType::Chapters;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut editions = Vec::new();
@@ -917,8 +917,8 @@ pub(crate) struct EditionEntryElement {
 impl Element for EditionEntryElement {
     const ID: ElementType = ElementType::EditionEntry;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut is_hidden = false;
@@ -1010,8 +1010,8 @@ pub(crate) struct EditionDisplayElement {
 impl Element for EditionDisplayElement {
     const ID: ElementType = ElementType::EditionDisplay;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut name = None;
@@ -1053,8 +1053,8 @@ pub(crate) struct ChapterAtomElement {
 impl Element for ChapterAtomElement {
     const ID: ElementType = ElementType::ChapterAtom;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut is_enabled = false;
@@ -1208,8 +1208,8 @@ pub(crate) struct ChapterDisplayElement {
 impl Element for ChapterDisplayElement {
     const ID: ElementType = ElementType::ChapterDisplay;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         let mut name = None;

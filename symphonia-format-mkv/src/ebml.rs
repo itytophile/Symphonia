@@ -172,55 +172,6 @@ mod tests {
     }
 }
 
-#[async_trait]
-impl<'s> ElementReader<'s> for MediaSourceStream<'s> {
-    fn is_seekable(&self) -> bool {
-        self.is_seekable()
-    }
-
-    fn byte_len(&self) -> Option<u64> {
-        self.byte_len()
-    }
-
-    async fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
-        self.seek(pos).await
-    }
-
-    fn inner(&mut self) -> &mut MediaSourceStream<'s> {
-        self
-    }
-}
-
-#[async_trait]
-impl<'s> ElementReader<'s> for &mut MediaSourceStream<'s> {
-    fn is_seekable(&self) -> bool {
-        (**self).is_seekable()
-    }
-
-    fn byte_len(&self) -> Option<u64> {
-        (**self).byte_len()
-    }
-
-    async fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
-        (**self).seek(pos).await
-    }
-
-    fn inner(&mut self) -> &mut MediaSourceStream<'s> {
-        self
-    }
-}
-
-#[async_trait]
-pub(crate) trait ElementReader<'s>: ReadBytes + Send {
-    fn is_seekable(&self) -> bool;
-
-    fn byte_len(&self) -> Option<u64>;
-
-    async fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64>;
-
-    fn inner(&mut self) -> &mut MediaSourceStream<'s>;
-}
-
 #[derive(Copy, Clone, Debug)]
 pub struct ElementHeader {
     /// The element tag.
@@ -241,7 +192,7 @@ pub struct ElementHeader {
 
 impl ElementHeader {
     /// Returns an iterator over child elements of the current element.
-    pub(crate) fn children<'s, R: ElementReader<'s>>(&self, reader: R) -> Result<ElementIterator<R>> {
+    pub(crate) fn children<'a, 's>(&self, reader: &'a mut MediaSourceStream<'s>) -> Result<ElementIterator<'a, 's>> {
         assert_eq!(reader.pos(), self.data_pos, "unexpected position");
         ElementIterator::new_of(reader, *self)
     }
@@ -258,22 +209,22 @@ impl ElementHeader {
 
 pub trait Element: Sized {
     const ID: ElementType;
-    fn read<'s, R: ElementReader<'s>>(it: ElementIterator<R>, header: ElementHeader) -> impl Future<Output = Result<Self>> + Send;
+    fn read(it: ElementIterator<'_, '_>, header: ElementHeader) -> impl Future<Output = Result<Self>> + Send;
 }
 
 impl ElementHeader {
     /// Reads a single EBML element header from the stream.
-    pub(crate) async fn read<'s, R: ElementReader<'s>>(
-        reader: &mut R,
+    pub(crate) async fn read(
+        mut reader: &mut MediaSourceStream<'_>,
         depth: u8,
     ) -> Result<(ElementHeader, bool)> {
-        let (tag, tag_len, reset) = read_tag(&mut *reader).await?;
+        let (tag, tag_len, reset) = read_tag(&mut reader).await?;
         let header_start = reader.pos() - u64::from(tag_len);
 
         // According to spec, elements like Segment and Cluster can have unknown size.
         // Currently, these cases are represented as `data_len` equal to 0,
         // but it might be worth changing it to an Option at some point.
-        let size = read_size(&mut *reader).await?.unwrap_or(0);
+        let size = read_size(&mut reader).await?.unwrap_or(0);
         Ok((
             ElementHeader {
                 tag,
@@ -297,16 +248,16 @@ pub(crate) struct EbmlElement {
 impl Element for EbmlElement {
     const ID: ElementType = ElementType::Ebml;
 
-    async fn read<'s, R: ElementReader<'s>>(
-        mut it: ElementIterator<R>,
+    async fn read(
+        mut it: ElementIterator<'_, '_>,
         _header: ElementHeader,
     ) -> Result<Self> {
         Ok(Self { header: it.read_element_data::<EbmlHeaderElement>().await? })
     }
 }
-pub(crate) struct ElementIterator<R> {
+pub(crate) struct ElementIterator<'a, 's> {
     /// Reader of the stream containing this element.
-    reader: R,
+    reader: &'a mut MediaSourceStream<'s>,
     /// Store current element header (for sanity check purposes).
     current: Option<ElementHeader>,
     /// Position of the next element header that would be read.
@@ -317,16 +268,16 @@ pub(crate) struct ElementIterator<R> {
     depth: u8,
 }
 
-impl<'s, R: ElementReader<'s>> ElementIterator<R> {
+impl<'a, 's> ElementIterator<'a, 's> {
     /// Creates a new iterator over elements starting from the current stream position.
-    pub(crate) fn new(reader: R, end: Option<u64>) -> Self {
+    pub(crate) fn new(reader: &'a mut MediaSourceStream<'s>, end: Option<u64>) -> Self {
         // Creates a new iterator over elements starting from the given stream position.
         let next_pos = reader.pos();
         Self { reader, current: None, next_pos, end, depth: 0 }
     }
 
     /// Creates a new iterator over children of the given parent element.
-    fn new_of(reader: R, parent: ElementHeader) -> Result<Self> {
+    fn new_of(reader: &'a mut MediaSourceStream<'s>, parent: ElementHeader) -> Result<Self> {
         let depth = parent
             .depth
             .checked_add(1)
@@ -357,11 +308,6 @@ impl<'s, R: ElementReader<'s>> ElementIterator<R> {
         }
         self.next_pos = pos;
         Ok(())
-    }
-
-    /// Consumes this iterator and return the original stream.
-    pub(crate) fn into_inner(self) -> R {
-        self.reader
     }
 
     /// Reads a single element header and moves to its next sibling by ignoring all the children.
@@ -436,7 +382,7 @@ impl<'s, R: ElementReader<'s>> ElementIterator<R> {
             return decode_error("mkv: unexpected EBML element");
         }
 
-        let it = header.children(self.reader.inner())?;
+        let it = header.children(&mut self.reader)?;
         let element = E::read(it, header).await?;
         // Update position to match the position element reader finished at
         self.next_pos = self.reader.pos();
@@ -458,7 +404,7 @@ impl<'s, R: ElementReader<'s>> ElementIterator<R> {
                 continue;
             }
 
-            let it = header.children(self.reader.inner())?;
+            let it = header.children(&mut self.reader)?;
 
             elements.push(E::read(it, header).await?);
         }
