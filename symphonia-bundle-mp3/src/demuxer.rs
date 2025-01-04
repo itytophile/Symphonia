@@ -42,7 +42,7 @@ const MP3_FORMAT_INFO: FormatInfo =
 ///
 /// `MpaReader` implements a demuxer for the MPEG1 and MPEG2 audio elementary stream.
 pub struct AsyncMpaReader<'s> {
-    reader: MediaSourceStream<'s>,
+    reader: AsyncMediaSourceStream<'s>,
     tracks: Vec<Track>,
     chapters: Option<ChapterGroup>,
     metadata: MetadataLog,
@@ -55,7 +55,7 @@ pub type MpaReader<'s> = BlockingFormatReader<AsyncMpaReader<'s>>;
 
 impl Scoreable for AsyncMpaReader<'_> {
     fn score<'s>(
-        mut src: ScopedStream<&'s mut MediaSourceStream<'_>>,
+        mut src: ScopedStream<&'s mut AsyncMediaSourceStream<'_>>,
     ) -> BoxFuture<'s, Result<Score>> {
         async move {
             // Read the sync word for the first (assumed) MPEG frame and try to parse it into a header.
@@ -92,7 +92,7 @@ impl Scoreable for AsyncMpaReader<'_> {
 
 impl<'s> ProbeableFormat<'s> for AsyncMpaReader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
         async move {
@@ -405,7 +405,7 @@ impl AsyncFormatReader for AsyncMpaReader<'_> {
 }
 
 impl<'s> AsyncMpaReader<'s> {
-    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         // Try to read the first MPEG frame.
         let (header, packet) = read_mpeg_frame_strict(&mut mss).await?;
 
@@ -554,7 +554,9 @@ impl<'s> AsyncMpaReader<'s> {
 }
 
 /// Reads a MPEG frame and returns the header and buffer.
-async fn read_mpeg_frame(reader: &mut MediaSourceStream<'_>) -> Result<(FrameHeader, Vec<u8>)> {
+async fn read_mpeg_frame(
+    reader: &mut AsyncMediaSourceStream<'_>,
+) -> Result<(FrameHeader, Vec<u8>)> {
     let (header, header_word) = loop {
         // Sync to the next frame header.
         let sync = header::sync_frame(reader).await?;
@@ -580,7 +582,7 @@ async fn read_mpeg_frame(reader: &mut MediaSourceStream<'_>) -> Result<(FrameHea
 
 /// Reads a MPEG frame and checks if the next frame begins after the packet.
 async fn read_mpeg_frame_strict(
-    reader: &mut MediaSourceStream<'_>,
+    reader: &mut AsyncMediaSourceStream<'_>,
 ) -> Result<(FrameHeader, Vec<u8>)> {
     loop {
         // Read the next MPEG frame.
@@ -654,7 +656,7 @@ async fn read_main_data_begin<B: ReadBytes>(reader: &mut B, header: &FrameHeader
 }
 
 /// Estimates the total number of MPEG frames in the media source stream.
-async fn estimate_num_mpeg_frames(reader: &mut MediaSourceStream<'_>) -> Option<u64> {
+async fn estimate_num_mpeg_frames(reader: &mut AsyncMediaSourceStream<'_>) -> Option<u64> {
     const MAX_FRAMES: u32 = 16;
     const MAX_LEN: usize = 16 * 1024;
 

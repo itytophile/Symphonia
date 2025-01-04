@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::SeekFrom;
 
 use symphonia_core::errors::Result;
-use symphonia_core::io::{MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
+use symphonia_core::io::{AsyncMediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
 
 use super::logical::{InspectState, LogicalStream};
 use super::page::*;
@@ -16,7 +16,7 @@ use super::page::*;
 use log::debug;
 
 pub async fn probe_stream_start(
-    reader: &mut MediaSourceStream<'_>,
+    reader: &mut AsyncMediaSourceStream<'_>,
     pages: &mut PageReader,
     streams: &mut BTreeMap<u32, LogicalStream>,
 ) {
@@ -66,7 +66,7 @@ pub async fn probe_stream_start(
 }
 
 pub async fn probe_stream_end(
-    reader: &mut MediaSourceStream<'_>,
+    reader: &mut AsyncMediaSourceStream<'_>,
     pages: &mut PageReader,
     streams: &mut BTreeMap<u32, LogicalStream>,
     byte_range_start: u64,
@@ -142,7 +142,7 @@ pub async fn probe_stream_end(
 }
 
 async fn scan_stream_end(
-    reader: &mut MediaSourceStream<'_>,
+    reader: &mut AsyncMediaSourceStream<'_>,
     pages: &mut PageReader,
     streams: &mut BTreeMap<u32, LogicalStream>,
     byte_range_end: u64,

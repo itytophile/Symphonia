@@ -104,7 +104,7 @@ struct SampleDataInfo {
 ///
 /// `IsoMp4Reader` implements a demuxer for the ISO Base Media File Format.
 pub struct AsyncIsoMp4Reader<'s> {
-    iter: AtomIterator<MediaSourceStream<'s>>,
+    iter: AtomIterator<AsyncMediaSourceStream<'s>>,
     tracks: Vec<Track>,
     metadata: MetadataLog,
     /// Segments of the movie. Sorted in ascending order by sequence number.
@@ -118,7 +118,7 @@ pub struct AsyncIsoMp4Reader<'s> {
 pub type IsoMp4Reader<'s> = BlockingFormatReader<AsyncIsoMp4Reader<'s>>;
 
 impl<'s> AsyncIsoMp4Reader<'s> {
-    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         // To get to beginning of the atom.
         mss.seek_buffered_rel(-4);
 
@@ -495,7 +495,7 @@ impl<'s> AsyncIsoMp4Reader<'s> {
 
 impl Scoreable for AsyncIsoMp4Reader<'_> {
     fn score<'s>(
-        _src: ScopedStream<&'s mut MediaSourceStream<'_>>,
+        _src: ScopedStream<&'s mut AsyncMediaSourceStream<'_>>,
     ) -> BoxFuture<'s, Result<Score>> {
         future::ok(Score::Supported(255)).boxed()
     }
@@ -503,7 +503,7 @@ impl Scoreable for AsyncIsoMp4Reader<'_> {
 
 impl<'s> ProbeableFormat<'s> for AsyncIsoMp4Reader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
         async move {

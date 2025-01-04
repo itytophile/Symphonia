@@ -13,7 +13,7 @@ use symphonia_core::audio::Channels;
 use symphonia_core::codecs::audio::{AudioCodecId, AudioCodecParameters};
 use symphonia_core::errors::{decode_error, Result};
 use symphonia_core::formats::prelude::*;
-use symphonia_core::io::{MediaSourceStream, ReadBytes};
+use symphonia_core::io::{AsyncMediaSourceStream, ReadBytes};
 
 use log::{debug, info};
 
@@ -267,7 +267,7 @@ impl PacketInfo {
 }
 
 pub async fn next_packet(
-    reader: &mut MediaSourceStream<'_>,
+    reader: &mut AsyncMediaSourceStream<'_>,
     packet_info: &PacketInfo,
     tracks: &[Track],
     data_start_pos: u64,

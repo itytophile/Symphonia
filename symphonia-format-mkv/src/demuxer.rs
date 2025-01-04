@@ -49,7 +49,7 @@ pub struct TrackState {
 pub struct AsyncMkvReader<'s> {
     /// Iterator over EBML element headers
     iter: ElementIterator,
-    mss: MediaSourceStream<'s>,
+    mss: AsyncMediaSourceStream<'s>,
     tracks: Vec<Track>,
     track_states: HashMap<u32, TrackState>,
     current_cluster: Option<ClusterState>,
@@ -70,7 +70,7 @@ struct ClusterState {
 }
 
 impl<'s> AsyncMkvReader<'s> {
-    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         // Get the total length of the stream, if possible.
         let (is_seekable, total_len) = (mss.is_seekable(), mss.byte_len());
 
@@ -461,7 +461,7 @@ impl<'s> AsyncMkvReader<'s> {
 
 impl<'s> ProbeableFormat<'s> for AsyncMkvReader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>>
     where
@@ -554,7 +554,7 @@ impl AsyncFormatReader for AsyncMkvReader<'_> {
 
 impl Scoreable for AsyncMkvReader<'_> {
     fn score<'s>(
-        _src: ScopedStream<&'s mut MediaSourceStream<'_>>,
+        _src: ScopedStream<&'s mut AsyncMediaSourceStream<'_>>,
     ) -> BoxFuture<'s, Result<Score>> {
         future::ok(Score::Supported(255)).boxed()
     }

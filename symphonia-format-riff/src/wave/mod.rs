@@ -45,7 +45,7 @@ const WAVE_FORMAT_INFO: FormatInfo = FormatInfo {
 ///
 /// `WavReader` implements a demuxer for the WAVE container format.
 pub struct AsyncWavReader<'s> {
-    reader: MediaSourceStream<'s>,
+    reader: AsyncMediaSourceStream<'s>,
     tracks: Vec<Track>,
     chapters: Option<ChapterGroup>,
     metadata: MetadataLog,
@@ -57,7 +57,7 @@ pub struct AsyncWavReader<'s> {
 pub type WavReader<'s> = BlockingFormatReader<AsyncWavReader<'s>>;
 
 impl<'s> AsyncWavReader<'s> {
-    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         // A Wave file is one large RIFF chunk, with the actual meta and audio data contained in
         // nested chunks. Therefore, the file starts with a RIFF chunk header (chunk ID & size).
 
@@ -166,7 +166,7 @@ impl<'s> AsyncWavReader<'s> {
 
 impl Scoreable for AsyncWavReader<'_> {
     fn score<'a>(
-        mut src: ScopedStream<&'a mut MediaSourceStream<'_>>,
+        mut src: ScopedStream<&'a mut AsyncMediaSourceStream<'_>>,
     ) -> BoxFuture<'a, Result<Score>> {
         async move {
             // Perform simple scoring by testing that the RIFF stream marker and RIFF form are both
@@ -187,7 +187,7 @@ impl Scoreable for AsyncWavReader<'_> {
 
 impl<'s> ProbeableFormat<'s> for AsyncWavReader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
         async move {

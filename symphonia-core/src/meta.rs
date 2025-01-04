@@ -60,7 +60,7 @@ use async_trait::async_trait;
 
 use crate::common::FourCc;
 use crate::errors::Result;
-use crate::io::MediaSourceStream;
+use crate::io::AsyncMediaSourceStream;
 use crate::units::Time;
 
 /// A `MetadataType` is a unique identifier used to identify a metadata format.
@@ -809,7 +809,7 @@ pub trait MetadataReader: Send + Sync {
     async fn read_all(&mut self) -> Result<MetadataBuffer>;
 
     /// Consumes the `MetadataReader` and returns the underlying media source stream
-    fn into_inner<'s>(self: Box<Self>) -> MediaSourceStream<'s>
+    fn into_inner<'s>(self: Box<Self>) -> AsyncMediaSourceStream<'s>
     where
         Self: 's;
 }

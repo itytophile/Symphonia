@@ -44,7 +44,7 @@ const FLAC_FORMAT_INFO: FormatInfo = FormatInfo {
 
 /// Free Lossless Audio Codec (FLAC) native frame reader.
 pub struct AsyncFlacReader<'s> {
-    reader: MediaSourceStream<'s>,
+    reader: AsyncMediaSourceStream<'s>,
     tracks: Vec<Track>,
     attachments: Vec<Attachment>,
     chapters: Option<ChapterGroup>,
@@ -57,7 +57,7 @@ pub struct AsyncFlacReader<'s> {
 pub type FlacReader<'s> = BlockingFormatReader<AsyncFlacReader<'s>>;
 
 impl<'s> AsyncFlacReader<'s> {
-    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         // Read the first 4 bytes of the stream. Ideally this will be the FLAC stream marker.
         let marker = mss.read_quad_bytes().await?;
 
@@ -80,7 +80,10 @@ impl<'s> AsyncFlacReader<'s> {
     }
 
     /// Reads all the metadata blocks, returning a fully populated `FlacReader`.
-    async fn init_with_metadata(mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+    async fn init_with_metadata(
+        mss: AsyncMediaSourceStream<'s>,
+        opts: FormatOptions,
+    ) -> Result<Self> {
         let mut metadata_builder = MetadataBuilder::new();
 
         let mut reader = mss;
@@ -205,7 +208,7 @@ impl<'s> AsyncFlacReader<'s> {
 
 impl Scoreable for AsyncFlacReader<'_> {
     fn score<'s>(
-        _src: ScopedStream<&'s mut MediaSourceStream<'_>>,
+        _src: ScopedStream<&'s mut AsyncMediaSourceStream<'_>>,
     ) -> BoxFuture<'s, Result<Score>> {
         future::ok(Score::Supported(255)).boxed()
     }
@@ -213,7 +216,7 @@ impl Scoreable for AsyncFlacReader<'_> {
 
 impl<'s> ProbeableFormat<'s> for AsyncFlacReader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
         async move {

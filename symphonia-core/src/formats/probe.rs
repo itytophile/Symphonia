@@ -13,9 +13,7 @@ use std::io::SeekFrom;
 use crate::common::Tier;
 use crate::errors::{unsupported_error, Error, Result};
 use crate::formats::{FormatInfo, FormatOptions};
-use crate::io::{
-    BlockingMediaSourceStream, MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered,
-};
+use crate::io::{AsyncMediaSourceStream, MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
 use crate::meta::{MetadataInfo, MetadataOptions, MetadataReader, MetadataSideData};
 
 use futures_util::future::BoxFuture;
@@ -145,13 +143,13 @@ pub struct ProbeMetadataData {
 
 /// `FormatReader` probe factory function. Creates a boxed `FormatReader`.
 pub type FormatFactoryFn = for<'s> fn(
-    MediaSourceStream<'s>,
+    AsyncMediaSourceStream<'s>,
     FormatOptions,
 ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>>;
 
 /// `MetadataReader` probe factory function. Creates a boxed `MetadataReader`.
 pub type MetadataFactoryFn = for<'s> fn(
-    MediaSourceStream<'s>,
+    AsyncMediaSourceStream<'s>,
     MetadataOptions,
 ) -> BoxFuture<'s, Result<Box<dyn MetadataReader + 's>>>;
 
@@ -177,7 +175,7 @@ enum ProbeMatch {
 
 /// A function pointer to the score function of the registered probeable.
 type ScoreFn =
-    for<'a> fn(ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>>;
+    for<'a> fn(ScopedStream<&'a mut AsyncMediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>>;
 
 /// Private/internal generalized representation of a probeable format or metadata reader.
 #[derive(Copy, Clone)]
@@ -228,11 +226,15 @@ pub trait Scoreable {
     /// If an error is returned, errors other than [`Error::IoError`] (excluding the unexpected EOF
     /// kind) are treated as if [`Score::Unsupported`] was returned. All other IO errors abort
     /// the probe operation.
-    fn score<'a>(src: ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>>;
+    fn score<'a>(
+        src: ScopedStream<&'a mut AsyncMediaSourceStream<'_>>,
+    ) -> BoxFuture<'a, Result<Score>>;
 }
 
 impl<S: Scoreable> Scoreable for BlockingFormatReader<S> {
-    fn score<'a>(src: ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>> {
+    fn score<'a>(
+        src: ScopedStream<&'a mut AsyncMediaSourceStream<'_>>,
+    ) -> BoxFuture<'a, Result<Score>> {
         S::score(src)
     }
 }
@@ -241,7 +243,7 @@ impl<S: Scoreable> Scoreable for BlockingFormatReader<S> {
 pub trait ProbeableFormat<'s>: Scoreable {
     /// Create an instance of the format reader.
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>>
     where
@@ -254,7 +256,7 @@ pub trait ProbeableFormat<'s>: Scoreable {
 
 impl<'s, P: ProbeableFormat<'s>> ProbeableFormat<'s> for BlockingFormatReader<P> {
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>>
     where
@@ -272,7 +274,7 @@ impl<'s, P: ProbeableFormat<'s>> ProbeableFormat<'s> for BlockingFormatReader<P>
 pub trait ProbeableMetadata<'s>: MetadataReader + Scoreable {
     /// Create an instance of the metadata reader.
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: MetadataOptions,
     ) -> BoxFuture<'s, Result<Box<dyn MetadataReader + 's>>>
     where
@@ -459,7 +461,7 @@ impl Probe {
     pub fn probe<'s>(
         &self,
         hint: &Hint,
-        mss: BlockingMediaSourceStream<'s>,
+        mss: MediaSourceStream<'s>,
         fmt_opts: FormatOptions,
         meta_opts: MetadataOptions,
     ) -> Result<BlockingFormatReader<Box<dyn AsyncFormatReader + 's>>> {
@@ -476,7 +478,7 @@ impl Probe {
     pub async fn probe_async<'s>(
         &self,
         hint: &Hint,
-        mut mss: MediaSourceStream<'s>,
+        mut mss: AsyncMediaSourceStream<'s>,
         mut fmt_opts: FormatOptions,
         meta_opts: MetadataOptions,
     ) -> Result<Box<dyn AsyncFormatReader + 's>> {
@@ -519,11 +521,11 @@ impl Probe {
     /// `MediaSourceStream`.
     async fn probe_trailing<'s>(
         &self,
-        mut mss: MediaSourceStream<'s>,
+        mut mss: AsyncMediaSourceStream<'s>,
         end: u64,
         fmt_opts: &mut FormatOptions,
         meta_opts: MetadataOptions,
-    ) -> Result<MediaSourceStream<'s>> {
+    ) -> Result<AsyncMediaSourceStream<'s>> {
         debug_assert!(mss.is_seekable());
 
         // The position of the media source stream after a reader successfully reads the stream.
@@ -573,7 +575,7 @@ impl Probe {
 
     /// Scans the provided `MediaSourceStream` from the current position for the best next metadata
     /// or format reader. If a match is found, returns it.
-    async fn next(&self, mss: &mut MediaSourceStream<'_>, _hint: &Hint) -> Result<ProbeMatch> {
+    async fn next(&self, mss: &mut AsyncMediaSourceStream<'_>, _hint: &Hint) -> Result<ProbeMatch> {
         let mut win = 0u16;
 
         let init_pos = mss.pos();
@@ -628,7 +630,7 @@ impl Probe {
     /// Find the best reader.
     async fn find_best_reader(
         &self,
-        mss: &mut MediaSourceStream<'_>,
+        mss: &mut AsyncMediaSourceStream<'_>,
         is_trailing: bool,
     ) -> Result<Option<ProbeMatch>> {
         // Read upto a 16 byte window starting with the marker.
@@ -667,10 +669,10 @@ impl Probe {
 
 async fn read_and_append_metadata<'s>(
     factory: MetadataFactoryFn,
-    mss: MediaSourceStream<'s>,
+    mss: AsyncMediaSourceStream<'s>,
     meta_opts: MetadataOptions,
     fmt_opts: &mut FormatOptions,
-) -> Result<MediaSourceStream<'s>> {
+) -> Result<AsyncMediaSourceStream<'s>> {
     // Create the metadata reader using the provided factory function.
     let mut reader = factory(mss, meta_opts).await?;
 
@@ -698,7 +700,7 @@ async fn read_and_append_metadata<'s>(
 }
 
 async fn find_reader(
-    mss: &mut MediaSourceStream<'_>,
+    mss: &mut AsyncMediaSourceStream<'_>,
     descs: &[GenericProbeMatch],
     win: [u8; 16],
     max_depth: u16,
@@ -755,7 +757,7 @@ async fn find_reader(
 
 async fn score(
     candidate: &GenericProbeMatch,
-    mss: &mut MediaSourceStream<'_>,
+    mss: &mut AsyncMediaSourceStream<'_>,
     max_depth: u16,
 ) -> Result<Score> {
     // Save the initial position to rewind back to after scoring is complete.

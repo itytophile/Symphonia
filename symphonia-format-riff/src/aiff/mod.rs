@@ -49,7 +49,7 @@ const AIFF_FORMAT_INFO: FormatInfo = FormatInfo {
 ///
 /// `AiffReader` implements a demuxer for the AIFF container format.
 pub struct AsyncAiffReader<'s> {
-    reader: MediaSourceStream<'s>,
+    reader: AsyncMediaSourceStream<'s>,
     tracks: Vec<Track>,
     attachments: Vec<Attachment>,
     chapters: Option<ChapterGroup>,
@@ -62,7 +62,7 @@ pub struct AsyncAiffReader<'s> {
 pub type AiffReader<'s> = BlockingFormatReader<AsyncAiffReader<'s>>;
 
 impl<'s> AsyncAiffReader<'s> {
-    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         // An AIFF file is one large RIFF chunk, with the actual meta and audio data contained in
         // nested chunks. Therefore, the file starts with a RIFF chunk header (chunk ID & size).
 
@@ -299,7 +299,7 @@ fn process_markers(
 
 impl Scoreable for AsyncAiffReader<'_> {
     fn score<'s>(
-        mut src: ScopedStream<&'s mut MediaSourceStream<'_>>,
+        mut src: ScopedStream<&'s mut AsyncMediaSourceStream<'_>>,
     ) -> BoxFuture<'s, Result<Score>> {
         async move {
             // Perform simple scoring by testing that the RIFF stream marker and RIFF form are both
@@ -324,7 +324,7 @@ impl Scoreable for AsyncAiffReader<'_> {
 
 impl<'s> ProbeableFormat<'s> for AsyncAiffReader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
         async move {

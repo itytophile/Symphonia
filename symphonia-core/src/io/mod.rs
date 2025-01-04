@@ -34,7 +34,7 @@ use futures_util::io::AllowStdIo;
 use futures_util::AsyncRead;
 use futures_util::AsyncSeek;
 pub use media_source_stream::{
-    BlockingMediaSourceStream, MediaSourceStream, MediaSourceStreamOptions,
+    AsyncMediaSourceStream, MediaSourceStream, MediaSourceStreamOptions,
 };
 pub use monitor_stream::{Monitor, MonitorStream};
 pub use scoped_stream::ScopedStream;

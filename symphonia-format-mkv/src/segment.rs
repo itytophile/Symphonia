@@ -13,7 +13,7 @@ use symphonia_core::codecs::video::well_known::extra_data::{
 use symphonia_core::codecs::video::VideoExtraData;
 use symphonia_core::errors::{Error, Result};
 use symphonia_core::formats::TrackFlags;
-use symphonia_core::io::{BufReader, MediaSourceStream, ReadBytes};
+use symphonia_core::io::{AsyncMediaSourceStream, BufReader, ReadBytes};
 use symphonia_core::meta::{
     Chapter, ChapterGroup, ChapterGroupItem, MetadataBuilder, MetadataRevision, RawTag,
     RawTagSubField, RawValue, StandardTag, Tag,
@@ -46,7 +46,7 @@ impl Element for TrackElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut number = None;
         let mut uid = None;
@@ -159,7 +159,7 @@ impl Element for AudioElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut sampling_frequency = None;
         let mut output_sampling_frequency = None;
@@ -208,7 +208,7 @@ impl Element for VideoElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut pixel_width = None;
         let mut pixel_height = None;
@@ -242,7 +242,7 @@ impl Element for BlockAdditionMappingElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         // There can be many BlockAdditionMapping elements with DolbyVisionConfiguration in a single track
         // BlockAddIdType FourCC string allows to determine the type of DolbyVisionConfiguration extra data
@@ -290,7 +290,7 @@ impl Element for SeekHeadElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut seeks = Vec::new();
 
@@ -321,7 +321,7 @@ impl Element for SeekElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut seek_id = None;
         let mut seek_position = None;
@@ -358,7 +358,7 @@ impl Element for TracksElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         Ok(Self { tracks: it.read_elements(reader).await? })
     }
@@ -382,7 +382,7 @@ impl Element for EbmlHeaderElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut version = None;
         let mut read_version = None;
@@ -449,7 +449,7 @@ impl Element for InfoElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut duration = None;
         let mut timestamp_scale = None;
@@ -502,7 +502,7 @@ impl Element for CuesElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         Ok(Self { points: it.read_elements(reader).await? })
     }
@@ -521,7 +521,7 @@ impl Element for CuePointElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut time = None;
         let mut pos = None;
@@ -557,7 +557,7 @@ impl Element for CueTrackPositionsElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut track = None;
         let mut pos = None;
@@ -594,7 +594,7 @@ impl Element for BlockGroupElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut data = None;
         let mut block_duration = None;
@@ -642,7 +642,7 @@ impl Element for ClusterElement {
     async fn read(
         mut it: ElementIterator,
         header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let pos = reader.pos();
         let mut timestamp = None;
@@ -703,7 +703,7 @@ impl Element for TagsElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut tags = Vec::new();
 
@@ -751,7 +751,7 @@ impl Element for TagElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut simple_tags = Vec::new();
 
@@ -782,7 +782,7 @@ impl Element for SimpleTagElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut name = None;
         let mut value = None;
@@ -822,7 +822,7 @@ impl Element for AttachedFileElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut name = None;
         let mut desc = None;
@@ -873,7 +873,7 @@ impl Element for AttachmentsElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut attached_files = Vec::new();
 
@@ -903,7 +903,7 @@ impl Element for ChaptersElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut editions = Vec::new();
 
@@ -938,7 +938,7 @@ impl Element for EditionEntryElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut is_hidden = false;
         let mut is_default = false;
@@ -1032,7 +1032,7 @@ impl Element for EditionDisplayElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut name = None;
         let mut lang_bcp47 = None;
@@ -1076,7 +1076,7 @@ impl Element for ChapterAtomElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut is_enabled = false;
         let mut is_hidden = false;
@@ -1232,7 +1232,7 @@ impl Element for ChapterDisplayElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         let mut name = None;
         let mut lang = None;

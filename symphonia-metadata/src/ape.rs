@@ -18,7 +18,7 @@ use symphonia_core::errors::{decode_error, unsupported_error, Result};
 use symphonia_core::formats::probe::{
     Anchors, ProbeMetadataData, ProbeableMetadata, Score, Scoreable,
 };
-use symphonia_core::io::{MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
+use symphonia_core::io::{AsyncMediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
 use symphonia_core::meta::well_known::{METADATA_ID_APEV1, METADATA_ID_APEV2};
 use symphonia_core::meta::{
     MetadataBuffer, MetadataBuilder, MetadataInfo, MetadataOptions, MetadataReader, RawTag,
@@ -286,12 +286,15 @@ impl ApeItem {
 
 /// APEv1 and APEv2 tag reader.
 pub struct ApeReader<'s> {
-    reader: MediaSourceStream<'s>,
+    reader: AsyncMediaSourceStream<'s>,
     version: ApeVersion,
 }
 
 impl<'s> ApeReader<'s> {
-    pub async fn try_new(mut mss: MediaSourceStream<'s>, _opts: MetadataOptions) -> Result<Self> {
+    pub async fn try_new(
+        mut mss: AsyncMediaSourceStream<'s>,
+        _opts: MetadataOptions,
+    ) -> Result<Self> {
         // Read and verify the APE tag preamble and version.
         let version = ApeHeader::read_identity(&mut mss).await?;
         mss.seek_buffered_rel(-12);
@@ -301,14 +304,16 @@ impl<'s> ApeReader<'s> {
 }
 
 impl Scoreable for ApeReader<'_> {
-    fn score<'a>(_: ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>> {
+    fn score<'a>(
+        _: ScopedStream<&'a mut AsyncMediaSourceStream<'_>>,
+    ) -> BoxFuture<'a, Result<Score>> {
         future::ok(Score::Supported(255)).boxed()
     }
 }
 
 impl<'s> ProbeableMetadata<'s> for ApeReader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: MetadataOptions,
     ) -> BoxFuture<'s, Result<Box<dyn MetadataReader + 's>>>
     where
@@ -452,7 +457,7 @@ impl MetadataReader for ApeReader<'_> {
         Ok(MetadataBuffer { revision: builder.metadata(), side_data: Vec::new() })
     }
 
-    fn into_inner<'s>(self: Box<Self>) -> MediaSourceStream<'s>
+    fn into_inner<'s>(self: Box<Self>) -> AsyncMediaSourceStream<'s>
     where
         Self: 's,
     {

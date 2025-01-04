@@ -10,7 +10,7 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::meta::MetadataOptions;
 use symphonia_core::{
     formats::{FormatReader, FormatReaderInfo, TrackType},
-    io::BlockingMediaSourceStream,
+    io::MediaSourceStream,
 };
 
 fn main() {
@@ -22,7 +22,7 @@ fn main() {
     let file = File::open(Path::new(&args[1])).unwrap();
 
     // Create the media source stream using the boxed media source from above.
-    let mss = BlockingMediaSourceStream::new(file, Default::default());
+    let mss = MediaSourceStream::new(file, Default::default());
 
     // Create a hint to help the format registry guess what format reader is appropriate. In this
     // example we'll leave it empty.

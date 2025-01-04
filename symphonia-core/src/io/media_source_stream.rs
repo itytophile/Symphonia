@@ -56,7 +56,7 @@ impl Default for MediaSourceStreamOptions {
 /// length buffer cache. By default, the buffer caches allows backtracking by up-to the minimum of
 /// either `buffer_len - 32kB` or the total number of bytes read since instantiation or the last
 /// buffer cache invalidation. Note that regular a `seek()` will invalidate the buffer cache.
-pub struct MediaSourceStream<'s> {
+pub struct AsyncMediaSourceStream<'s> {
     /// The source reader.
     inner: Pin<Box<dyn AsyncMediaSource + 's>>,
     /// The ring buffer.
@@ -76,22 +76,22 @@ pub struct MediaSourceStream<'s> {
     rel_pos: u64,
 }
 
-pub struct BlockingMediaSourceStream<'s>(MediaSourceStream<'s>);
+pub struct MediaSourceStream<'s>(AsyncMediaSourceStream<'s>);
 
-impl<'s> BlockingMediaSourceStream<'s> {
+impl<'s> MediaSourceStream<'s> {
     pub fn new(source: impl MediaSource + 's, options: MediaSourceStreamOptions) -> Self {
-        Self(MediaSourceStream::new(
+        Self(AsyncMediaSourceStream::new(
             Box::pin(AllowStdIo::new(source)) as Pin<Box<dyn AsyncMediaSource>>,
             options,
         ))
     }
 
-    pub fn into_inner(self) -> MediaSourceStream<'s> {
+    pub fn into_inner(self) -> AsyncMediaSourceStream<'s> {
         self.0
     }
 }
 
-impl<'s> MediaSourceStream<'s> {
+impl<'s> AsyncMediaSourceStream<'s> {
     const MIN_BLOCK_LEN: usize = 1 * 1024;
     const MAX_BLOCK_LEN: usize = 32 * 1024;
 
@@ -103,7 +103,7 @@ impl<'s> MediaSourceStream<'s> {
         assert!(options.buffer_len.count_ones() == 1);
         assert!(options.buffer_len > Self::MAX_BLOCK_LEN);
 
-        MediaSourceStream {
+        AsyncMediaSourceStream {
             inner: source,
             ring: vec![0; options.buffer_len].into_boxed_slice(),
             ring_mask: options.buffer_len - 1,
@@ -251,7 +251,7 @@ impl<'s> MediaSourceStream<'s> {
     }
 }
 
-impl ReadBytes for MediaSourceStream<'_> {
+impl ReadBytes for AsyncMediaSourceStream<'_> {
     #[inline(always)]
     async fn read_byte(&mut self) -> io::Result<u8> {
         // This function, read_byte, is inlined for performance. To reduce code bloat, place the
@@ -392,7 +392,7 @@ impl ReadBytes for MediaSourceStream<'_> {
     }
 }
 
-impl SeekBuffered for MediaSourceStream<'_> {
+impl SeekBuffered for AsyncMediaSourceStream<'_> {
     fn ensure_seekback_buffer(&mut self, len: usize) {
         let ring_len = self.ring.len();
 
@@ -488,7 +488,7 @@ mod tests {
 
     use futures_util::{io::AllowStdIo, FutureExt};
 
-    use super::{MediaSourceStream, ReadBytes, SeekBuffered};
+    use super::{AsyncMediaSourceStream, ReadBytes, SeekBuffered};
 
     /// Generate a random vector of bytes of the specified length using a PRNG.
     fn generate_random_bytes(len: usize) -> Box<[u8]> {
@@ -510,7 +510,7 @@ mod tests {
     fn verify_mss_read() {
         let data = generate_random_bytes(5 * 96 * 1024);
 
-        let mut mss = MediaSourceStream::new(
+        let mut mss = AsyncMediaSourceStream::new(
             Box::pin(futures_util::io::Cursor::new(data.clone())),
             Default::default(),
         );
@@ -557,7 +557,7 @@ mod tests {
         .unwrap()
     }
 
-    struct DumbRead<'s>(MediaSourceStream<'s>);
+    struct DumbRead<'s>(AsyncMediaSourceStream<'s>);
 
     impl Read for DumbRead<'_> {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -569,7 +569,7 @@ mod tests {
     fn verify_mss_read_to_end() {
         let data = generate_random_bytes(5 * 96 * 1024);
 
-        let mss = MediaSourceStream::new(
+        let mss = AsyncMediaSourceStream::new(
             Box::pin(AllowStdIo::new(std::io::Cursor::new(data.clone()))),
             Default::default(),
         );
@@ -583,7 +583,7 @@ mod tests {
     fn verify_mss_seek_buffered() {
         let data = generate_random_bytes(1024 * 1024);
 
-        let mut mss = MediaSourceStream::new(
+        let mut mss = AsyncMediaSourceStream::new(
             Box::pin(futures_util::io::Cursor::new(data.clone())),
             Default::default(),
         );
@@ -619,7 +619,7 @@ mod tests {
     fn verify_reading_be() {
         let data = generate_random_bytes(1024 * 1024);
 
-        let mut mss = MediaSourceStream::new(
+        let mut mss = AsyncMediaSourceStream::new(
             Box::pin(futures_util::io::Cursor::new(data.clone())),
             Default::default(),
         );
@@ -644,7 +644,7 @@ mod tests {
     fn verify_reading_le() {
         let data = generate_random_bytes(1024 * 1024);
 
-        let mut mss = MediaSourceStream::new(
+        let mut mss = AsyncMediaSourceStream::new(
             Box::pin(futures_util::io::Cursor::new(data.clone())),
             Default::default(),
         );

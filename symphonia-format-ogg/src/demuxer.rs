@@ -36,7 +36,7 @@ const OGG_FORMAT_INFO: FormatInfo =
 ///
 /// `OggReader` implements a demuxer for Xiph's OGG container format.
 pub struct AsyncOggReader<'s> {
-    reader: MediaSourceStream<'s>,
+    reader: AsyncMediaSourceStream<'s>,
     tracks: Vec<Track>,
     chapters: Option<ChapterGroup>,
     metadata: MetadataLog,
@@ -54,7 +54,7 @@ pub struct AsyncOggReader<'s> {
 pub type OggReader<'s> = BlockingFormatReader<AsyncOggReader<'s>>;
 
 impl<'s> AsyncOggReader<'s> {
-    pub async fn try_new(mut mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         // A seekback buffer equal to the maximum OGG page size is required for this reader.
         mss.ensure_seekback_buffer(OGG_PAGE_MAX_SIZE);
 
@@ -421,7 +421,7 @@ impl<'s> AsyncOggReader<'s> {
 
 impl Scoreable for AsyncOggReader<'_> {
     fn score<'s>(
-        _src: ScopedStream<&'s mut MediaSourceStream<'_>>,
+        _src: ScopedStream<&'s mut AsyncMediaSourceStream<'_>>,
     ) -> BoxFuture<'s, Result<Score>> {
         future::ok(Score::Supported(255)).boxed()
     }
@@ -429,7 +429,7 @@ impl Scoreable for AsyncOggReader<'_> {
 
 impl<'s> ProbeableFormat<'s> for AsyncOggReader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
         async move {

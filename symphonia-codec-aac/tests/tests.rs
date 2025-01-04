@@ -5,11 +5,13 @@ use symphonia_core::codecs::audio::{
 };
 use symphonia_core::errors;
 use symphonia_core::formats::probe::ProbeableFormat;
-use symphonia_core::io::MediaSourceStream;
+use symphonia_core::io::AsyncMediaSourceStream;
 
 async fn test_decode(data: Vec<u8>) -> symphonia_core::errors::Result<()> {
-    let mss =
-        MediaSourceStream::new(Box::pin(futures_util::io::Cursor::new(data)), Default::default());
+    let mss = AsyncMediaSourceStream::new(
+        Box::pin(futures_util::io::Cursor::new(data)),
+        Default::default(),
+    );
 
     let mut reader = AdtsReader::try_probe_new(mss, Default::default()).await?;
 

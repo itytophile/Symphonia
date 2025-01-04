@@ -11,7 +11,7 @@ use std::io::SeekFrom;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use symphonia_core::errors::{decode_error, seek_error, Error, Result, SeekErrorKind};
-use symphonia_core::io::{MediaSourceStream, ReadBytes};
+use symphonia_core::io::{AsyncMediaSourceStream, ReadBytes};
 use symphonia_core::util::bits::sign_extend_leq64_to_i64;
 
 use crate::element_ids::{ElementType, Type, ELEMENTS};
@@ -197,7 +197,7 @@ pub struct ElementHeader {
 
 impl ElementHeader {
     /// Returns an iterator over child elements of the current element.
-    pub(crate) fn children(&self, reader: &MediaSourceStream<'_>) -> Result<ElementIterator> {
+    pub(crate) fn children(&self, reader: &AsyncMediaSourceStream<'_>) -> Result<ElementIterator> {
         assert_eq!(reader.pos(), self.data_pos, "unexpected position");
         ElementIterator::new_of(*self)
     }
@@ -217,14 +217,14 @@ pub trait Element: Sized {
     fn read<'a>(
         it: ElementIterator,
         header: ElementHeader,
-        reader: &'a mut MediaSourceStream<'_>,
+        reader: &'a mut AsyncMediaSourceStream<'_>,
     ) -> impl Future<Output = Result<Self>> + 'a + Send;
 }
 
 impl ElementHeader {
     /// Reads a single EBML element header from the stream.
     pub(crate) async fn read(
-        mut reader: &mut MediaSourceStream<'_>,
+        mut reader: &mut AsyncMediaSourceStream<'_>,
         depth: u8,
     ) -> Result<(ElementHeader, bool)> {
         let (tag, tag_len, reset) = read_tag(&mut reader).await?;
@@ -260,7 +260,7 @@ impl Element for EbmlElement {
     async fn read(
         mut it: ElementIterator,
         _header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Self> {
         Ok(Self { header: it.read_element_data::<EbmlHeaderElement>(reader).await? })
     }
@@ -278,7 +278,7 @@ pub(crate) struct ElementIterator {
 
 impl ElementIterator {
     /// Creates a new iterator over elements starting from the current stream position.
-    pub(crate) fn new(reader: &MediaSourceStream<'_>, end: Option<u64>) -> Self {
+    pub(crate) fn new(reader: &AsyncMediaSourceStream<'_>, end: Option<u64>) -> Self {
         // Creates a new iterator over elements starting from the given stream position.
         let next_pos = reader.pos();
         Self { current: None, next_pos, end, depth: 0 }
@@ -298,7 +298,7 @@ impl ElementIterator {
     /// Seek to a specified offset inside of the stream.
     pub(crate) async fn seek(
         &mut self,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
         pos: u64,
     ) -> Result<()> {
         let current_pos = reader.pos();
@@ -319,7 +319,7 @@ impl ElementIterator {
     /// Reads a single element header and moves to its next sibling by ignoring all the children.
     pub(crate) async fn read_header(
         &mut self,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Option<ElementHeader>> {
         let header = self.read_header_no_consume(reader).await?;
         if let Some(header) = &header {
@@ -333,7 +333,7 @@ impl ElementIterator {
     /// if it'a a master element or to next sibling otherwise.
     pub(crate) async fn read_child_header(
         &mut self,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Option<ElementHeader>> {
         let header = self.read_header_no_consume(reader).await?;
         if let Some(header) = &header {
@@ -356,7 +356,7 @@ impl ElementIterator {
     /// Returns [None] if the current element has no more children or reached end of the stream.
     async fn read_header_no_consume(
         &mut self,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Option<ElementHeader>> {
         let pos = reader.pos();
         if pos < self.next_pos {
@@ -384,7 +384,7 @@ impl ElementIterator {
     /// Reads a single element with its data.
     pub(crate) async fn read_element<E: Element>(
         &mut self,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<E> {
         let _header = self.read_header(reader).await?;
         self.read_element_data(reader).await
@@ -394,7 +394,7 @@ impl ElementIterator {
     /// [Self::read_header] or [Self::read_child_header].
     pub(crate) fn read_element_data<'a, E: Element>(
         &'a mut self,
-        reader: &'a mut MediaSourceStream<'_>,
+        reader: &'a mut AsyncMediaSourceStream<'_>,
     ) -> BoxFuture<'a, Result<E>> {
         async move {
             let header =
@@ -417,7 +417,7 @@ impl ElementIterator {
     /// Reads a collection of element with the given type.
     pub(crate) async fn read_elements<E: Element>(
         &mut self,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Box<[E]>> {
         let mut elements = vec![];
         while let Some(header) = self.read_header(reader).await? {
@@ -442,7 +442,7 @@ impl ElementIterator {
     /// Reads any primitive data inside of the current element.
     pub(crate) async fn read_data(
         &mut self,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<ElementData> {
         let hdr = self.current.expect("not in an element");
         let value = self
@@ -453,7 +453,10 @@ impl ElementIterator {
     }
 
     /// Reads data of the current element as an unsigned integer.
-    pub(crate) async fn read_u64(&mut self, reader: &mut MediaSourceStream<'_>) -> Result<u64> {
+    pub(crate) async fn read_u64(
+        &mut self,
+        reader: &mut AsyncMediaSourceStream<'_>,
+    ) -> Result<u64> {
         match self.read_data(reader).await? {
             ElementData::UnsignedInt(s) => Ok(s),
             _ => Err(Error::DecodeError("mkv: expected an unsigned int")),
@@ -461,7 +464,10 @@ impl ElementIterator {
     }
 
     /// Reads data of the current element as a floating-point number.
-    pub(crate) async fn read_f64(&mut self, reader: &mut MediaSourceStream<'_>) -> Result<f64> {
+    pub(crate) async fn read_f64(
+        &mut self,
+        reader: &mut AsyncMediaSourceStream<'_>,
+    ) -> Result<f64> {
         match self.read_data(reader).await? {
             ElementData::Float(s) => Ok(s),
             _ => Err(Error::DecodeError("mkv: expected a float")),
@@ -471,7 +477,7 @@ impl ElementIterator {
     /// Reads data of the current element as a string.
     pub(crate) async fn read_string(
         &mut self,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<String> {
         match self.read_data(reader).await? {
             ElementData::String(s) => Ok(s),
@@ -482,7 +488,7 @@ impl ElementIterator {
     /// Reads binary data of the current element as boxed slice.
     pub(crate) async fn read_boxed_slice(
         &mut self,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Box<[u8]>> {
         match self.read_data(reader).await? {
             ElementData::Binary(b) => Ok(b),
@@ -495,7 +501,7 @@ impl ElementIterator {
     pub(crate) async fn try_read_data(
         &mut self,
         header: ElementHeader,
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
     ) -> Result<Option<ElementData>> {
         Ok(match ELEMENTS.get(&header.tag) {
             Some((ty, _)) => {
@@ -572,7 +578,10 @@ impl ElementIterator {
 
     /// Ignores content of the current element. It can be used after calling
     /// [Self::read_child_header] to ignore children of a master element.
-    pub(crate) async fn ignore_data(&mut self, reader: &mut MediaSourceStream<'_>) -> Result<()> {
+    pub(crate) async fn ignore_data(
+        &mut self,
+        reader: &mut AsyncMediaSourceStream<'_>,
+    ) -> Result<()> {
         if let Some(header) = self.current {
             log::debug!("ignoring data of {:?} element", header.etype);
             reader.ignore_bytes(header.data_len).await?;

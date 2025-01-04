@@ -40,7 +40,7 @@ pub type CafReader<'s> = BlockingFormatReader<AsyncCafReader<'s>>;
 ///
 /// `CafReader` implements a demuxer for Core Audio Format containers.
 pub struct AsyncCafReader<'s> {
-    reader: MediaSourceStream<'s>,
+    reader: AsyncMediaSourceStream<'s>,
     tracks: Vec<Track>,
     chapters: Option<ChapterGroup>,
     metadata: MetadataLog,
@@ -57,7 +57,7 @@ enum PacketInfo {
 
 impl Scoreable for AsyncCafReader<'_> {
     fn score<'s>(
-        _src: ScopedStream<&'s mut MediaSourceStream<'_>>,
+        _src: ScopedStream<&'s mut AsyncMediaSourceStream<'_>>,
     ) -> BoxFuture<'s, Result<Score>> {
         future::ok(Score::Supported(255)).boxed()
     }
@@ -65,7 +65,7 @@ impl Scoreable for AsyncCafReader<'_> {
 
 impl ProbeableFormat<'_> for AsyncCafReader<'_> {
     fn try_probe_new<'s>(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
         async {
@@ -252,7 +252,7 @@ impl AsyncFormatReader for AsyncCafReader<'_> {
 }
 
 impl<'s> AsyncCafReader<'s> {
-    pub async fn try_new(mss: MediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
+    pub async fn try_new(mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
         let mut reader = Self {
             reader: mss,
             tracks: vec![],

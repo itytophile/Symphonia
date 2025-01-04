@@ -17,7 +17,7 @@ use symphonia_core::codecs::audio::well_known::{
 use symphonia_core::codecs::audio::AudioCodecId;
 use symphonia_core::errors::{decode_error, unsupported_error, Error, Result};
 use symphonia_core::formats::Track;
-use symphonia_core::io::{MediaSourceStream, ReadBytes};
+use symphonia_core::io::{AsyncMediaSourceStream, ReadBytes};
 use symphonia_core::meta::{MetadataBuilder, MetadataRevision};
 
 use symphonia_metadata::embedded::riff;
@@ -628,7 +628,7 @@ pub fn append_fact_params(track: &mut Track, fact: &FactChunk) {
 }
 
 pub async fn read_info_chunk(
-    source: &mut MediaSourceStream<'_>,
+    source: &mut AsyncMediaSourceStream<'_>,
     len: u32,
 ) -> Result<MetadataRevision> {
     let mut list = ChunksReader::<RiffInfoListChunks>::new(len, ByteOrder::LittleEndian);

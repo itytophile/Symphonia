@@ -11,7 +11,7 @@ use symphonia_core::{
     audio::{layouts, AmbisonicBFormat, ChannelLabel, Channels, Position},
     codecs::audio::{well_known::*, AudioCodecId},
     errors::{decode_error, unsupported_error, Error, Result},
-    io::{MediaSourceStream, ReadBytes},
+    io::{AsyncMediaSourceStream, ReadBytes},
 };
 
 // CAF audio channel layouts.
@@ -79,7 +79,7 @@ impl Chunk {
     /// The first chunk read will be the AudioDescription chunk. Once it's been read, the caller
     /// should pass it in to subsequent read calls.
     pub async fn read(
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
         audio_description: &Option<AudioDescription>,
     ) -> Result<Option<Self>> {
         let chunk_type = reader.read_quad_bytes().await?;
@@ -137,7 +137,7 @@ pub struct AudioDescription {
 }
 
 impl AudioDescription {
-    pub async fn read(reader: &mut MediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
+    pub async fn read(reader: &mut AsyncMediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
         if chunk_size != 32 {
             return invalid_chunk_size_error("Audio Description", chunk_size);
         }
@@ -233,7 +233,7 @@ pub struct AudioData {
 }
 
 impl AudioData {
-    pub async fn read(reader: &mut MediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
+    pub async fn read(reader: &mut AsyncMediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
         let edit_count_offset = size_of::<u32>() as i64;
 
         if chunk_size != -1 && chunk_size < edit_count_offset {
@@ -272,7 +272,7 @@ pub enum AudioDescriptionFormatId {
 }
 
 impl AudioDescriptionFormatId {
-    pub async fn read(reader: &mut MediaSourceStream<'_>) -> Result<Self> {
+    pub async fn read(reader: &mut AsyncMediaSourceStream<'_>) -> Result<Self> {
         use AudioDescriptionFormatId::*;
 
         let format_id = reader.read_quad_bytes().await?;
@@ -325,7 +325,7 @@ pub struct ChannelLayout {
 }
 
 impl ChannelLayout {
-    pub async fn read(reader: &mut MediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
+    pub async fn read(reader: &mut AsyncMediaSourceStream<'_>, chunk_size: i64) -> Result<Self> {
         if chunk_size < 12 {
             return invalid_chunk_size_error("Channel Layout", chunk_size);
         }
@@ -438,7 +438,7 @@ pub struct ChannelDescription {
 }
 
 impl ChannelDescription {
-    pub async fn read(reader: &mut MediaSourceStream<'_>) -> Result<Self> {
+    pub async fn read(reader: &mut AsyncMediaSourceStream<'_>) -> Result<Self> {
         Ok(Self {
             channel_label: reader.read_be_u32().await?,
             channel_flags: reader.read_be_u32().await?,
@@ -460,7 +460,7 @@ pub struct PacketTable {
 
 impl PacketTable {
     pub async fn read(
-        reader: &mut MediaSourceStream<'_>,
+        reader: &mut AsyncMediaSourceStream<'_>,
         desc: &Option<AudioDescription>,
         chunk_size: i64,
     ) -> Result<Self> {
@@ -589,7 +589,7 @@ fn invalid_chunk_size_error<T>(chunk_type: &str, chunk_size: i64) -> Result<T> {
     decode_error("caf: invalid chunk size")
 }
 
-async fn read_variable_length_integer(reader: &mut MediaSourceStream<'_>) -> Result<u64> {
+async fn read_variable_length_integer(reader: &mut AsyncMediaSourceStream<'_>) -> Result<u64> {
     let mut result = 0;
 
     for _ in 0..9 {
@@ -615,7 +615,7 @@ mod tests {
 
     fn variable_length_integer_test(bytes: &[u8], expected: u64) -> Result<()> {
         let cursor = futures_util::io::Cursor::new(Vec::from(bytes));
-        let mut source = MediaSourceStream::new(Box::pin(cursor), Default::default());
+        let mut source = AsyncMediaSourceStream::new(Box::pin(cursor), Default::default());
 
         assert_eq!(read_variable_length_integer(&mut source).now_or_never().unwrap()?, expected);
 
@@ -640,7 +640,7 @@ mod tests {
         let cursor = futures_util::io::Cursor::new(&[
             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
         ]);
-        let mut source = MediaSourceStream::new(Box::pin(cursor), Default::default());
+        let mut source = AsyncMediaSourceStream::new(Box::pin(cursor), Default::default());
 
         assert!(read_variable_length_integer(&mut source).now_or_never().unwrap().is_err());
     }

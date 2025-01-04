@@ -42,7 +42,7 @@ const ADTS_FORMAT_INFO: FormatInfo = FormatInfo {
 ///
 /// `AdtsReader` implements a demuxer for ADTS (AAC native frames).
 pub struct AsyncAdtsReader<'s> {
-    reader: MediaSourceStream<'s>,
+    reader: AsyncMediaSourceStream<'s>,
     tracks: Vec<Track>,
     chapters: Option<ChapterGroup>,
     metadata: MetadataLog,
@@ -53,7 +53,7 @@ pub struct AsyncAdtsReader<'s> {
 pub type AdtsReader<'s> = BlockingFormatReader<AsyncAdtsReader<'s>>;
 
 pub async fn try_new_async(
-    mut mss: MediaSourceStream<'_>,
+    mut mss: AsyncMediaSourceStream<'_>,
     opts: FormatOptions,
 ) -> Result<AsyncAdtsReader<'_>> {
     let header = AdtsHeader::read(&mut mss).await?;
@@ -97,15 +97,18 @@ pub fn try_new<'s>(
     opts: FormatOptions,
 ) -> Result<AdtsReader<'s>> {
     Ok(BlockingFormatReader::new(
-        try_new_async(MediaSourceStream::new(Box::pin(AllowStdIo::new(source)), options), opts)
-            .now_or_never()
-            .unwrap()?,
+        try_new_async(
+            AsyncMediaSourceStream::new(Box::pin(AllowStdIo::new(source)), options),
+            opts,
+        )
+        .now_or_never()
+        .unwrap()?,
     ))
 }
 
 impl Scoreable for AsyncAdtsReader<'_> {
     fn score<'a>(
-        mut src: ScopedStream<&'a mut MediaSourceStream<'_>>,
+        mut src: ScopedStream<&'a mut AsyncMediaSourceStream<'_>>,
     ) -> BoxFuture<'a, Result<Score>> {
         async move {
             // Read the first (assumed) ADTS header.
@@ -265,7 +268,7 @@ impl AdtsHeader {
 
 impl ProbeableFormat<'_> for AsyncAdtsReader<'_> {
     fn try_probe_new<'s>(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
         async move { Ok(Box::new(try_new_async(mss, opts).await?) as Box<dyn AsyncFormatReader>) }
@@ -414,7 +417,9 @@ impl AsyncFormatReader for AsyncAdtsReader<'_> {
     }
 }
 
-async fn approximate_frame_count(mut source: &mut MediaSourceStream<'_>) -> Result<Option<u64>> {
+async fn approximate_frame_count(
+    mut source: &mut AsyncMediaSourceStream<'_>,
+) -> Result<Option<u64>> {
     let original_pos = source.pos();
     let total_len = match source.byte_len() {
         Some(len) => len - original_pos,

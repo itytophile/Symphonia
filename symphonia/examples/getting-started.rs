@@ -5,7 +5,7 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::meta::MetadataOptions;
 use symphonia_core::{
     formats::{FormatReader, FormatReaderInfo, TrackType},
-    io::BlockingMediaSourceStream,
+    io::MediaSourceStream,
 };
 
 fn main() {
@@ -14,7 +14,7 @@ fn main() {
     let path = args.get(1).expect("file path not provided");
 
     // Create the media source stream.
-    let mss = BlockingMediaSourceStream::new(
+    let mss = MediaSourceStream::new(
         std::fs::File::open(path).expect("failed to open media"),
         Default::default(),
     );

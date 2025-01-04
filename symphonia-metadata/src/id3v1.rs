@@ -15,7 +15,7 @@ use symphonia_core::errors::{unsupported_error, Result};
 use symphonia_core::formats::probe::{
     Anchors, ProbeMetadataData, ProbeableMetadata, Score, Scoreable,
 };
-use symphonia_core::io::{MediaSourceStream, ReadBytes, ScopedStream};
+use symphonia_core::io::{AsyncMediaSourceStream, ReadBytes, ScopedStream};
 use symphonia_core::meta::well_known::METADATA_ID_ID3V1;
 use symphonia_core::meta::{
     MetadataBuffer, MetadataBuilder, MetadataInfo, MetadataOptions, MetadataReader, StandardTag,
@@ -106,24 +106,26 @@ const ID3V1_METADATA_INFO: MetadataInfo =
 
 /// ID3v1 tag reader.
 pub struct Id3v1Reader<'s> {
-    reader: MediaSourceStream<'s>,
+    reader: AsyncMediaSourceStream<'s>,
 }
 
 impl<'s> Id3v1Reader<'s> {
-    pub fn try_new(mss: MediaSourceStream<'s>, _opts: MetadataOptions) -> Result<Self> {
+    pub fn try_new(mss: AsyncMediaSourceStream<'s>, _opts: MetadataOptions) -> Result<Self> {
         Ok(Self { reader: mss })
     }
 }
 
 impl Scoreable for Id3v1Reader<'_> {
-    fn score<'a>(_: ScopedStream<&'a mut MediaSourceStream<'_>>) -> BoxFuture<'a, Result<Score>> {
+    fn score<'a>(
+        _: ScopedStream<&'a mut AsyncMediaSourceStream<'_>>,
+    ) -> BoxFuture<'a, Result<Score>> {
         future::ok(Score::Supported(255)).boxed()
     }
 }
 
 impl<'s> ProbeableMetadata<'s> for Id3v1Reader<'_> {
     fn try_probe_new(
-        mss: MediaSourceStream<'s>,
+        mss: AsyncMediaSourceStream<'s>,
         opts: MetadataOptions,
     ) -> BoxFuture<'s, Result<Box<dyn MetadataReader + 's>>>
     where
@@ -150,7 +152,7 @@ impl MetadataReader for Id3v1Reader<'_> {
         Ok(MetadataBuffer { revision: builder.metadata(), side_data: Vec::new() })
     }
 
-    fn into_inner<'s>(self: Box<Self>) -> MediaSourceStream<'s>
+    fn into_inner<'s>(self: Box<Self>) -> AsyncMediaSourceStream<'s>
     where
         Self: 's,
     {

@@ -22,7 +22,7 @@ use symphonia::core::codecs::CodecParameters;
 use symphonia::core::errors::{Error, Result};
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, TrackType};
-use symphonia::core::io::{BlockingMediaSourceStream, ReadOnlySource};
+use symphonia::core::io::{MediaSourceStream, ReadOnlySource};
 use symphonia::core::meta::{MetadataOptions, Visual};
 use symphonia::core::units::Time;
 
@@ -140,7 +140,7 @@ fn run(args: &ArgMatches) -> Result<i32> {
 
     // If the path string is '-' then read from standard input.
     let mss = if path.as_os_str() == "-" {
-        BlockingMediaSourceStream::new(ReadOnlySource::new(std::io::stdin()), Default::default())
+        MediaSourceStream::new(ReadOnlySource::new(std::io::stdin()), Default::default())
     }
     else {
         // Otherwise, get a Path from the path string.
@@ -152,7 +152,7 @@ fn run(args: &ArgMatches) -> Result<i32> {
             }
         }
 
-        BlockingMediaSourceStream::new(File::open(path)?, Default::default())
+        MediaSourceStream::new(File::open(path)?, Default::default())
     };
 
     // Use the default options for format readers other than for gapless playback.

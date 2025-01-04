@@ -16,7 +16,7 @@ use symphonia_core::codecs::audio::well_known::{
     CODEC_ID_PCM_S8,
 };
 use symphonia_core::errors::{decode_error, unsupported_error, Result};
-use symphonia_core::io::{MediaSourceStream, ReadBytes};
+use symphonia_core::io::{AsyncMediaSourceStream, ReadBytes};
 use symphonia_core::meta::{MetadataBuilder, MetadataRevision, StandardTag, Tag};
 use symphonia_core::util::text;
 use symphonia_metadata::embedded::riff;
@@ -206,16 +206,16 @@ impl fmt::Display for CommonChunk {
 }
 
 pub trait CommonChunkParser {
-    async fn parse_aiff(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk>;
-    async fn parse_aifc(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk>;
+    async fn parse_aiff(self, source: &mut AsyncMediaSourceStream<'_>) -> Result<CommonChunk>;
+    async fn parse_aifc(self, source: &mut AsyncMediaSourceStream<'_>) -> Result<CommonChunk>;
 }
 
 impl CommonChunkParser for ChunkParser<CommonChunk> {
-    async fn parse_aiff(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk> {
+    async fn parse_aiff(self, source: &mut AsyncMediaSourceStream<'_>) -> Result<CommonChunk> {
         self.parse(source).await
     }
 
-    async fn parse_aifc(self, source: &mut MediaSourceStream<'_>) -> Result<CommonChunk> {
+    async fn parse_aifc(self, source: &mut AsyncMediaSourceStream<'_>) -> Result<CommonChunk> {
         let n_channels = source.read_be_i16().await?;
         let n_sample_frames = source.read_be_u32().await?;
         let sample_size = source.read_be_i16().await?;
