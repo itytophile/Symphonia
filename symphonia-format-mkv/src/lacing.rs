@@ -30,15 +30,15 @@ fn parse_flags(flags: u8) -> Result<Lacing> {
     }
 }
 
-fn read_ebml_sizes<R: ReadBytes>(mut reader: R, frames: usize) -> Result<Vec<u64>> {
+async fn read_ebml_sizes<R: ReadBytes>(mut reader: R, frames: usize) -> Result<Vec<u64>> {
     let mut sizes = Vec::new();
     for _ in 0..frames {
         if let Some(last_size) = sizes.last().copied() {
-            let delta = read_signed_vint(&mut reader)?;
+            let delta = read_signed_vint(&mut reader).await?;
             sizes.push((last_size as i64 + delta) as u64)
         }
         else {
-            let size = read_unsigned_vint(&mut reader)?;
+            let size = read_unsigned_vint(&mut reader).await?;
             sizes.push(size);
         }
     }
@@ -46,11 +46,14 @@ fn read_ebml_sizes<R: ReadBytes>(mut reader: R, frames: usize) -> Result<Vec<u64
     Ok(sizes)
 }
 
-pub(crate) fn read_xiph_sizes<R: ReadBytes>(mut reader: R, frames: usize) -> Result<Vec<u64>> {
+pub(crate) async fn read_xiph_sizes<R: ReadBytes>(
+    mut reader: R,
+    frames: usize,
+) -> Result<Vec<u64>> {
     let mut prefixes = 0;
     let mut sizes = Vec::new();
     while sizes.len() < frames {
-        let byte = reader.read_byte()? as u64;
+        let byte = reader.read_byte().await? as u64;
         if byte == 255 {
             prefixes += 1;
         }
@@ -81,7 +84,7 @@ pub(crate) fn calc_abs_block_timestamp(cluster_ts: u64, rel_block_ts: i16) -> u6
     }
 }
 
-pub(crate) fn extract_frames(
+pub(crate) async fn extract_frames(
     block: &[u8],
     block_duration: Option<u64>,
     tracks: &HashMap<u32, TrackState>,
@@ -90,7 +93,7 @@ pub(crate) fn extract_frames(
     buffer: &mut VecDeque<Frame>,
 ) -> Result<()> {
     let mut reader = BufReader::new(block);
-    let track = read_unsigned_vint(&mut reader)? as u32;
+    let track = read_unsigned_vint(&mut reader).await? as u32;
     let rel_ts = reader.read_be_u16()? as i16;
     let flags = reader.read_byte()?;
     let lacing = parse_flags(flags)?;
@@ -111,8 +114,8 @@ pub(crate) fn extract_frames(
             // since size of the last frame is deduced from block size.
             let frames = reader.read_byte()? as usize;
             let sizes = match lacing {
-                Lacing::Xiph => read_xiph_sizes(&mut reader, frames)?,
-                Lacing::Ebml => read_ebml_sizes(&mut reader, frames)?,
+                Lacing::Xiph => read_xiph_sizes(&mut reader, frames).await?,
+                Lacing::Ebml => read_ebml_sizes(&mut reader, frames).await?,
                 _ => unreachable!(),
             };
 

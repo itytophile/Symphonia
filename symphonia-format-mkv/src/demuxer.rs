@@ -408,7 +408,8 @@ impl<'s> AsyncMkvReader<'s> {
                     cluster_ts,
                     self.timestamp_scale,
                     &mut self.frames,
-                )?;
+                )
+                .await?;
             }
             ElementType::BlockGroup => {
                 let cluster_ts = match self.current_cluster.as_ref() {
@@ -433,7 +434,8 @@ impl<'s> AsyncMkvReader<'s> {
                     cluster_ts,
                     self.timestamp_scale,
                     &mut self.frames,
-                )?;
+                )
+                .await?;
             }
             ElementType::Tags => {
                 let tags = self.iter.read_element_data::<TagsElement>().await?;

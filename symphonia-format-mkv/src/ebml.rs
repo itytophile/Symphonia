@@ -203,6 +203,10 @@ impl<'s> DerefMut for OwnedElementReader<'s> {
     }
 }
 
+impl<'s> ElementReader for OwnedElementReader<'s> {
+    type Inner = MediaSourceStream<'s>;
+}
+
 trait Dumb: ReadBytes {
     fn is_seekable(&self) -> bool;
 

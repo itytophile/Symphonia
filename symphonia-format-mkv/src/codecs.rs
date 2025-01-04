@@ -177,7 +177,7 @@ fn vorbis_extra_data_from_codec_private(extra: &[u8]) -> Result<Box<[u8]>> {
 
     let mut reader = BufReader::new(extra);
     let packet_count = reader.read_byte()? as usize;
-    let packet_lengths = read_xiph_sizes(&mut reader, packet_count)?;
+    let packet_lengths = read_xiph_sizes(&mut reader, packet_count).now_or_never().unwrap()?;
 
     let mut packets = Vec::new();
     for length in packet_lengths {
