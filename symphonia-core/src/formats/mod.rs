@@ -422,7 +422,7 @@ pub trait FormatReaderInfo {
 }
 
 #[async_trait]
-pub trait AsyncFormatReader: FormatReaderInfo {
+pub trait AsyncFormatReader: FormatReaderInfo + Send + Sync {
     async fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo>;
 
     async fn next_packet(&mut self) -> Result<Option<Packet>>;
@@ -512,6 +512,50 @@ impl<T: AsyncFormatReader> FormatReaderInfo for BlockingFormatReader<T> {
 }
 
 impl<T: AsyncFormatReader + Send + Sync> FormatReader for BlockingFormatReader<T> {
+    fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
+        self.0.seek(mode, to).now_or_never().unwrap()
+    }
+
+    fn next_packet(&mut self) -> Result<Option<Packet>> {
+        self.0.next_packet().now_or_never().unwrap()
+    }
+}
+
+impl FormatReaderInfo for BlockingFormatReader<Box<dyn AsyncFormatReader>> {
+    fn format_info(&self) -> &FormatInfo {
+        self.0.format_info()
+    }
+
+    fn metadata(&mut self) -> Metadata<'_> {
+        self.0.metadata()
+    }
+
+    fn attachments(&self) -> &[Attachment] {
+        self.0.attachments()
+    }
+
+    fn chapters(&self) -> Option<&ChapterGroup> {
+        self.0.chapters()
+    }
+
+    fn first_track(&self, track_type: TrackType) -> Option<&Track> {
+        self.0.first_track(track_type)
+    }
+
+    fn first_track_known_codec(&self, track_type: TrackType) -> Option<&Track> {
+        self.0.first_track_known_codec(track_type)
+    }
+
+    fn default_track(&self, track_type: TrackType) -> Option<&Track> {
+        self.0.default_track(track_type)
+    }
+
+    fn tracks(&self) -> &[Track] {
+        self.0.tracks()
+    }
+}
+
+impl FormatReader for BlockingFormatReader<Box<dyn AsyncFormatReader>> {
     fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
         self.0.seek(mode, to).now_or_never().unwrap()
     }

@@ -22,7 +22,7 @@ use symphonia::core::codecs::CodecParameters;
 use symphonia::core::errors::{Error, Result};
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, TrackType};
-use symphonia::core::io::{MediaSource, MediaSourceStream, ReadOnlySource};
+use symphonia::core::io::{MediaSourceStream, ReadOnlySource};
 use symphonia::core::meta::{MetadataOptions, Visual};
 use symphonia::core::units::Time;
 
@@ -139,11 +139,11 @@ fn run(args: &ArgMatches) -> Result<i32> {
     let mut hint = Hint::new();
 
     // If the path string is '-' then read from standard input.
-    let source = if path.as_os_str() == "-" {
-        Box::new(ReadOnlySource::new(std::io::stdin())) as Box<dyn MediaSource>
+    let mss = if path.as_os_str() == "-" {
+        MediaSourceStream::new_blocking(ReadOnlySource::new(std::io::stdin()), Default::default())
     }
     else {
-        // Othwerise, get a Path from the path string.
+        // Otherwise, get a Path from the path string.
 
         // Provide the file extension as a hint.
         if let Some(extension) = path.extension() {
@@ -152,11 +152,8 @@ fn run(args: &ArgMatches) -> Result<i32> {
             }
         }
 
-        Box::new(File::open(path)?)
+        MediaSourceStream::new_blocking(File::open(path)?, Default::default())
     };
-
-    // Create the media source stream using the boxed media source from above.
-    let mss = MediaSourceStream::new(source, Default::default());
 
     // Use the default options for format readers other than for gapless playback.
     let fmt_opts =
@@ -166,7 +163,7 @@ fn run(args: &ArgMatches) -> Result<i32> {
     let meta_opts: MetadataOptions = Default::default();
 
     // Probe the media source stream for metadata and get the format reader.
-    match symphonia::default::get_probe().probe(&hint, mss, fmt_opts, meta_opts) {
+    match symphonia::default::get_probe().probe_blocking(&hint, mss, fmt_opts, meta_opts) {
         Ok(mut format) => {
             // Dump visuals if requested.
             if args.is_present("dump-visuals") {
@@ -249,7 +246,7 @@ struct DecodeOptions {
     track_num: Option<usize>,
 }
 
-fn decode_only(mut reader: Box<dyn FormatReader>, opts: DecodeOptions) -> Result<i32> {
+fn decode_only(mut reader: impl FormatReader, opts: DecodeOptions) -> Result<i32> {
     // If the user provided a track number, select that track if it exists, otherwise, select the
     // default audio track.
     let track = opts
@@ -321,7 +318,7 @@ struct PlayTrackOptions {
     no_progress: bool,
 }
 
-fn play(mut reader: Box<dyn FormatReader>, opts: PlayOptions) -> Result<i32> {
+fn play(mut reader: impl FormatReader, opts: PlayOptions) -> Result<i32> {
     // If the user provided a track number, select that track if it exists, otherwise, select the
     // default audio track.
     let track = opts
@@ -400,7 +397,7 @@ fn play(mut reader: Box<dyn FormatReader>, opts: PlayOptions) -> Result<i32> {
 }
 
 fn play_track(
-    reader: &mut Box<dyn FormatReader>,
+    reader: &mut impl FormatReader,
     audio_output: &mut Option<Box<dyn output::AudioOutput>>,
     opts: PlayTrackOptions,
 ) -> Result<i32> {
@@ -499,7 +496,7 @@ fn play_track(
     do_verification(decoder.finalize())
 }
 
-fn do_reset(reader: &mut Box<dyn FormatReader>) -> Option<u32> {
+fn do_reset(reader: &mut impl FormatReader) -> Option<u32> {
     // The demuxer indicated that a reset is required. This is sometimes seen with streaming OGG
     // (e.g., Icecast) wherein the entire contents of the container change (new tracks, codecs,
     // metadata, etc.). Therefore, we must select a new track and recreate the decoder.
@@ -524,7 +521,7 @@ fn do_verification(finalization: FinalizeResult) -> Result<i32> {
     }
 }
 
-fn dump_visuals(format: &mut Box<dyn FormatReader>, file_name: &OsStr) {
+fn dump_visuals(format: &mut impl FormatReader, file_name: &OsStr) {
     if let Some(metadata) = format.metadata().current() {
         for (i, visual) in metadata.visuals().iter().enumerate() {
             dump_visual(visual, file_name, i);

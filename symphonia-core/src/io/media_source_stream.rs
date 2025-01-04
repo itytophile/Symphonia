@@ -11,10 +11,12 @@ use std::io::IoSliceMut;
 use std::ops::Sub;
 use std::pin::Pin;
 
+use futures_util::io::AllowStdIo;
 use futures_util::AsyncReadExt;
 use futures_util::AsyncSeekExt;
 
 use super::AsyncMediaSource;
+use super::MediaSource;
 use super::ReadBytes;
 use super::SeekBuffered;
 
@@ -77,6 +79,10 @@ pub struct MediaSourceStream<'s> {
 impl<'s> MediaSourceStream<'s> {
     const MIN_BLOCK_LEN: usize = 1 * 1024;
     const MAX_BLOCK_LEN: usize = 32 * 1024;
+
+    pub fn new_blocking(source: impl MediaSource + 's, options: MediaSourceStreamOptions) -> Self {
+        Self::new(Box::pin(AllowStdIo::new(source)) as Pin<Box<dyn AsyncMediaSource>>, options)
+    }
 
     pub fn new(
         source: Pin<Box<dyn AsyncMediaSource + 's>>,

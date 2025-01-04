@@ -17,6 +17,7 @@ use crate::io::{MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
 use crate::meta::{MetadataInfo, MetadataOptions, MetadataReader, MetadataSideData};
 
 use futures_util::future::BoxFuture;
+use futures_util::FutureExt;
 use log::{debug, error, trace, warn};
 
 use super::{AsyncFormatReader, BlockingFormatReader};
@@ -451,6 +452,18 @@ impl Probe {
             Tier::Standard => self.standard.push(candidate),
             Tier::Fallback => self.fallback.push(candidate),
         }
+    }
+
+    pub fn probe_blocking<'s>(
+        &self,
+        hint: &Hint,
+        mss: MediaSourceStream<'s>,
+        fmt_opts: FormatOptions,
+        meta_opts: MetadataOptions,
+    ) -> Result<BlockingFormatReader<Box<dyn AsyncFormatReader + 's>>> {
+        Ok(BlockingFormatReader::new(
+            self.probe(hint, mss, fmt_opts, meta_opts).now_or_never().unwrap()?,
+        ))
     }
 
     /// Searches the provided `MediaSourceStream` for a container format. Any metadata that is read

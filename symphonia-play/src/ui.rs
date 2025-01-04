@@ -24,7 +24,7 @@ const MIN_PAD: usize = 20;
 /// The maximum padding for tag keys.
 const MAX_PAD: usize = 40;
 
-pub fn print_format(path: &Path, format: &mut Box<dyn FormatReader>) {
+pub fn print_format(path: &Path, format: &mut impl FormatReader) {
     println!("+ {}", path.display());
 
     let format_info = format.format_info();
