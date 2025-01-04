@@ -69,59 +69,134 @@ struct ClusterState {
     end: Option<u64>,
 }
 
-impl<'s> AsyncMkvReader<'s> {
-    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
-        // Get the total length of the stream, if possible.
-        let (is_seekable, total_len) = (mss.is_seekable(), mss.byte_len());
+pub fn try_new(mss: MediaSourceStream<'_>, opts: FormatOptions) -> Result<MkvReader<'_>> {
+    Ok(BlockingFormatReader::new(try_new_async(mss.into_inner(), opts).now_or_never().unwrap()?))
+}
 
-        match total_len {
-            Some(len) if is_seekable => info!("stream is seekable with len={} bytes.", len),
-            _ => (),
-        }
+pub async fn try_new_async(
+    mut mss: AsyncMediaSourceStream<'_>,
+    opts: FormatOptions,
+) -> Result<AsyncMkvReader<'_>> {
+    // Get the total length of the stream, if possible.
+    let (is_seekable, total_len) = (mss.is_seekable(), mss.byte_len());
 
-        let mut it = ElementIterator::new(&mss, total_len);
-        let ebml = it.read_element::<EbmlElement>(&mut mss).await?;
+    match total_len {
+        Some(len) if is_seekable => info!("stream is seekable with len={} bytes.", len),
+        _ => (),
+    }
 
-        if !matches!(ebml.header.doc_type.as_str(), "matroska" | "webm") {
-            return unsupported_error("mkv: not a matroska / webm file");
-        }
+    let mut it = ElementIterator::new(&mss, total_len);
+    let ebml = it.read_element::<EbmlElement>(&mut mss).await?;
 
-        let segment_pos = match it.read_child_header(&mut mss).await? {
-            Some(ElementHeader { etype: ElementType::Segment, data_pos, .. }) => data_pos,
-            _ => return unsupported_error("mkv: missing segment element"),
-        };
+    if !matches!(ebml.header.doc_type.as_str(), "matroska" | "webm") {
+        return unsupported_error("mkv: not a matroska / webm file");
+    }
 
-        let mut segment_tracks = None;
-        let mut info = None;
-        let mut clusters = Vec::new();
-        let mut current_cluster = None;
-        let mut seek_positions = Vec::new();
+    let segment_pos = match it.read_child_header(&mut mss).await? {
+        Some(ElementHeader { etype: ElementType::Segment, data_pos, .. }) => data_pos,
+        _ => return unsupported_error("mkv: missing segment element"),
+    };
 
-        let mut metadata = opts.external_data.metadata.unwrap_or_default();
-        let mut attachments = Vec::new();
-        let mut chapters = opts.external_data.chapters;
+    let mut segment_tracks = None;
+    let mut info = None;
+    let mut clusters = Vec::new();
+    let mut current_cluster = None;
+    let mut seek_positions = Vec::new();
 
-        while let Ok(Some(header)) = it.read_child_header(&mut mss).await {
-            match header.etype {
-                ElementType::SeekHead => {
-                    let seek_head = it.read_element_data::<SeekHeadElement>(&mut mss).await?;
-                    for element in seek_head.seeks.into_vec() {
-                        let tag = element.id as u32;
-                        let etype = match ELEMENTS.get(&tag) {
-                            Some((_, etype)) => *etype,
-                            None => continue,
-                        };
-                        seek_positions.push((etype, segment_pos + element.position));
-                    }
+    let mut metadata = opts.external_data.metadata.unwrap_or_default();
+    let mut attachments = Vec::new();
+    let mut chapters = opts.external_data.chapters;
+
+    while let Ok(Some(header)) = it.read_child_header(&mut mss).await {
+        match header.etype {
+            ElementType::SeekHead => {
+                let seek_head = it.read_element_data::<SeekHeadElement>(&mut mss).await?;
+                for element in seek_head.seeks.into_vec() {
+                    let tag = element.id as u32;
+                    let etype = match ELEMENTS.get(&tag) {
+                        Some((_, etype)) => *etype,
+                        None => continue,
+                    };
+                    seek_positions.push((etype, segment_pos + element.position));
                 }
+            }
+            ElementType::Tracks => {
+                segment_tracks = Some(it.read_element_data::<TracksElement>(&mut mss).await?);
+            }
+            ElementType::Info => {
+                info = Some(it.read_element_data::<InfoElement>(&mut mss).await?);
+            }
+            ElementType::Cues => {
+                let cues = it.read_element_data::<CuesElement>(&mut mss).await?;
+                for cue in cues.points.into_vec() {
+                    clusters.push(ClusterElement {
+                        timestamp: cue.time,
+                        pos: segment_pos + cue.positions.cluster_position,
+                        end: None,
+                        blocks: Box::new([]),
+                    });
+                }
+            }
+            ElementType::Tags => {
+                let tags = it.read_element_data::<TagsElement>(&mut mss).await?;
+                metadata.push(tags.to_metadata());
+            }
+            ElementType::Cluster => {
+                // Set state for current cluster for the first call of `next_element`.
+                current_cluster = Some(ClusterState { timestamp: None, end: header.end() });
+
+                // Don't look forward into the stream since
+                // we can't be sure that we'll find anything useful.
+                break;
+            }
+            ElementType::Attachments => {
+                let attachments_elem = it.read_element_data::<AttachmentsElement>(&mut mss).await?;
+                for file in attachments_elem.attached_files {
+                    attachments.push(Attachment::File(FileAttachment {
+                        name: file.name,
+                        description: file.desc,
+                        media_type: Some(file.media_type),
+                        data: file.data,
+                    }));
+                }
+            }
+            ElementType::Chapters => {
+                let chapters_elem = it.read_element_data::<ChaptersElement>(&mut mss).await?;
+                chapters = chapters_elem.build_chapter_group()
+            }
+            other => {
+                it.ignore_data(&mut mss).await?;
+                log::debug!("ignored element {:?}", other);
+            }
+        }
+    }
+
+    if is_seekable {
+        // All elements preceeding the element iterator's current position have already been
+        // read and do not need to be revisited.
+        seek_positions.retain(|sp| sp.1 >= mss.pos());
+        // Make sure we don't jump backwards unnecessarily.
+        seek_positions.sort_by_key(|sp| sp.1);
+
+        for (etype, pos) in seek_positions {
+            it.seek(&mut mss, pos).await?;
+
+            // Safety: The element type or position may be incorrect. The element iterator will
+            // validate the type (as declared in the header) of the element at the seeked
+            // position against the element type asked to be read.
+            match etype {
                 ElementType::Tracks => {
-                    segment_tracks = Some(it.read_element_data::<TracksElement>(&mut mss).await?);
+                    segment_tracks = Some(it.read_element::<TracksElement>(&mut mss).await?);
                 }
                 ElementType::Info => {
-                    info = Some(it.read_element_data::<InfoElement>(&mut mss).await?);
+                    info = Some(it.read_element::<InfoElement>(&mut mss).await?);
+                }
+                ElementType::Tags => {
+                    let tags = it.read_element::<TagsElement>(&mut mss).await?;
+                    metadata.push(tags.to_metadata());
                 }
                 ElementType::Cues => {
-                    let cues = it.read_element_data::<CuesElement>(&mut mss).await?;
+                    let cues = it.read_element::<CuesElement>(&mut mss).await?;
                     for cue in cues.points.into_vec() {
                         clusters.push(ClusterElement {
                             timestamp: cue.time,
@@ -131,21 +206,8 @@ impl<'s> AsyncMkvReader<'s> {
                         });
                     }
                 }
-                ElementType::Tags => {
-                    let tags = it.read_element_data::<TagsElement>(&mut mss).await?;
-                    metadata.push(tags.to_metadata());
-                }
-                ElementType::Cluster => {
-                    // Set state for current cluster for the first call of `next_element`.
-                    current_cluster = Some(ClusterState { timestamp: None, end: header.end() });
-
-                    // Don't look forward into the stream since
-                    // we can't be sure that we'll find anything useful.
-                    break;
-                }
                 ElementType::Attachments => {
-                    let attachments_elem =
-                        it.read_element_data::<AttachmentsElement>(&mut mss).await?;
+                    let attachments_elem = it.read_element::<AttachmentsElement>(&mut mss).await?;
                     for file in attachments_elem.attached_files {
                         attachments.push(Attachment::File(FileAttachment {
                             name: file.name,
@@ -156,132 +218,74 @@ impl<'s> AsyncMkvReader<'s> {
                     }
                 }
                 ElementType::Chapters => {
-                    let chapters_elem = it.read_element_data::<ChaptersElement>(&mut mss).await?;
+                    let chapters_elem = it.read_element::<ChaptersElement>(&mut mss).await?;
                     chapters = chapters_elem.build_chapter_group()
                 }
-                other => {
-                    it.ignore_data(&mut mss).await?;
-                    log::debug!("ignored element {:?}", other);
-                }
+                _ => (),
             }
         }
-
-        if is_seekable {
-            // All elements preceeding the element iterator's current position have already been
-            // read and do not need to be revisited.
-            seek_positions.retain(|sp| sp.1 >= mss.pos());
-            // Make sure we don't jump backwards unnecessarily.
-            seek_positions.sort_by_key(|sp| sp.1);
-
-            for (etype, pos) in seek_positions {
-                it.seek(&mut mss, pos).await?;
-
-                // Safety: The element type or position may be incorrect. The element iterator will
-                // validate the type (as declared in the header) of the element at the seeked
-                // position against the element type asked to be read.
-                match etype {
-                    ElementType::Tracks => {
-                        segment_tracks = Some(it.read_element::<TracksElement>(&mut mss).await?);
-                    }
-                    ElementType::Info => {
-                        info = Some(it.read_element::<InfoElement>(&mut mss).await?);
-                    }
-                    ElementType::Tags => {
-                        let tags = it.read_element::<TagsElement>(&mut mss).await?;
-                        metadata.push(tags.to_metadata());
-                    }
-                    ElementType::Cues => {
-                        let cues = it.read_element::<CuesElement>(&mut mss).await?;
-                        for cue in cues.points.into_vec() {
-                            clusters.push(ClusterElement {
-                                timestamp: cue.time,
-                                pos: segment_pos + cue.positions.cluster_position,
-                                end: None,
-                                blocks: Box::new([]),
-                            });
-                        }
-                    }
-                    ElementType::Attachments => {
-                        let attachments_elem =
-                            it.read_element::<AttachmentsElement>(&mut mss).await?;
-                        for file in attachments_elem.attached_files {
-                            attachments.push(Attachment::File(FileAttachment {
-                                name: file.name,
-                                description: file.desc,
-                                media_type: Some(file.media_type),
-                                data: file.data,
-                            }));
-                        }
-                    }
-                    ElementType::Chapters => {
-                        let chapters_elem = it.read_element::<ChaptersElement>(&mut mss).await?;
-                        chapters = chapters_elem.build_chapter_group()
-                    }
-                    _ => (),
-                }
-            }
-        }
-
-        let segment_tracks =
-            segment_tracks.ok_or(Error::DecodeError("mkv: missing Tracks element"))?;
-
-        if is_seekable {
-            it.seek(&mut mss, segment_pos).await?;
-        }
-
-        let info = info.ok_or(Error::DecodeError("mkv: missing Info element"))?;
-
-        // TODO: remove this unwrap?
-        let time_base = TimeBase::new(u32::try_from(info.timestamp_scale).unwrap(), 1_000_000_000);
-
-        let mut tracks = Vec::new();
-        let mut states = HashMap::new();
-
-        for track in segment_tracks.tracks {
-            // Create the track state.
-            let state = TrackState {
-                track_num: track.number as u32,
-                default_frame_duration: track.default_duration,
-            };
-
-            // Create the track.
-            let mut tr = Track::new(state.track_num);
-
-            tr.with_time_base(time_base);
-
-            if let Some(duration) = info.duration {
-                tr.with_num_frames(duration as u64);
-            }
-
-            if let Some(language) = &track.language {
-                tr.with_language(language);
-            }
-
-            tr.with_flags(track.flags);
-
-            if let Some(codec_params) = make_track_codec_params(track)? {
-                tr.with_codec_params(codec_params);
-            }
-
-            tracks.push(tr);
-            states.insert(state.track_num, state);
-        }
-
-        Ok(Self {
-            iter: it,
-            mss,
-            tracks,
-            track_states: states,
-            current_cluster,
-            attachments,
-            chapters,
-            metadata,
-            frames: VecDeque::new(),
-            timestamp_scale: info.timestamp_scale,
-            clusters,
-        })
     }
 
+    let segment_tracks = segment_tracks.ok_or(Error::DecodeError("mkv: missing Tracks element"))?;
+
+    if is_seekable {
+        it.seek(&mut mss, segment_pos).await?;
+    }
+
+    let info = info.ok_or(Error::DecodeError("mkv: missing Info element"))?;
+
+    // TODO: remove this unwrap?
+    let time_base = TimeBase::new(u32::try_from(info.timestamp_scale).unwrap(), 1_000_000_000);
+
+    let mut tracks = Vec::new();
+    let mut states = HashMap::new();
+
+    for track in segment_tracks.tracks {
+        // Create the track state.
+        let state = TrackState {
+            track_num: track.number as u32,
+            default_frame_duration: track.default_duration,
+        };
+
+        // Create the track.
+        let mut tr = Track::new(state.track_num);
+
+        tr.with_time_base(time_base);
+
+        if let Some(duration) = info.duration {
+            tr.with_num_frames(duration as u64);
+        }
+
+        if let Some(language) = &track.language {
+            tr.with_language(language);
+        }
+
+        tr.with_flags(track.flags);
+
+        if let Some(codec_params) = make_track_codec_params(track)? {
+            tr.with_codec_params(codec_params);
+        }
+
+        tracks.push(tr);
+        states.insert(state.track_num, state);
+    }
+
+    Ok(AsyncMkvReader {
+        iter: it,
+        mss,
+        tracks,
+        track_states: states,
+        current_cluster,
+        attachments,
+        chapters,
+        metadata,
+        frames: VecDeque::new(),
+        timestamp_scale: info.timestamp_scale,
+        clusters,
+    })
+}
+
+impl<'s> AsyncMkvReader<'s> {
     async fn seek_track_by_ts_forward(&mut self, track_id: u32, ts: u64) -> Result<SeekedTo> {
         let actual_ts = 'out: loop {
             // Skip frames from the buffer until the given timestamp
@@ -467,10 +471,8 @@ impl<'s> ProbeableFormat<'s> for AsyncMkvReader<'_> {
     where
         Self: Sized,
     {
-        async move {
-            Ok(Box::new(AsyncMkvReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
-        }
-        .boxed()
+        async move { Ok(Box::new(try_new_async(mss, opts).await?) as Box<dyn AsyncFormatReader>) }
+            .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
