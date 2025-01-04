@@ -456,7 +456,7 @@ impl Probe {
         }
     }
 
-    pub fn probe_blocking<'s>(
+    pub fn probe<'s>(
         &self,
         hint: &Hint,
         mss: BlockingMediaSourceStream<'s>,
@@ -464,14 +464,16 @@ impl Probe {
         meta_opts: MetadataOptions,
     ) -> Result<BlockingFormatReader<Box<dyn AsyncFormatReader + 's>>> {
         Ok(BlockingFormatReader::new(
-            self.probe(hint, mss.into_inner(), fmt_opts, meta_opts).now_or_never().unwrap()?,
+            self.probe_async(hint, mss.into_inner(), fmt_opts, meta_opts)
+                .now_or_never()
+                .unwrap()?,
         ))
     }
 
     /// Searches the provided `MediaSourceStream` for a container format. Any metadata that is read
     /// during the search will be queued and attached to the `FormatReader` instance once a
     /// container format is found.
-    pub async fn probe<'s>(
+    pub async fn probe_async<'s>(
         &self,
         hint: &Hint,
         mut mss: MediaSourceStream<'s>,
