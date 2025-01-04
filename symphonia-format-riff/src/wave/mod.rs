@@ -56,109 +56,114 @@ pub struct AsyncWavReader<'s> {
 
 pub type WavReader<'s> = BlockingFormatReader<AsyncWavReader<'s>>;
 
-impl<'s> AsyncWavReader<'s> {
-    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
-        // A Wave file is one large RIFF chunk, with the actual meta and audio data contained in
-        // nested chunks. Therefore, the file starts with a RIFF chunk header (chunk ID & size).
+pub fn try_new(mss: MediaSourceStream<'_>, opts: FormatOptions) -> Result<WavReader<'_>> {
+    Ok(BlockingFormatReader::new(try_new_async(mss.into_inner(), opts).now_or_never().unwrap()?))
+}
 
-        // The top-level chunk has the RIFF chunk ID. This is also the file marker.
-        let marker = mss.read_quad_bytes().await?;
+pub async fn try_new_async(
+    mut mss: AsyncMediaSourceStream<'_>,
+    opts: FormatOptions,
+) -> Result<AsyncWavReader<'_>> {
+    // A Wave file is one large RIFF chunk, with the actual meta and audio data contained in
+    // nested chunks. Therefore, the file starts with a RIFF chunk header (chunk ID & size).
 
-        if marker != WAVE_STREAM_MARKER {
-            return unsupported_error("wav: missing wave riff stream marker");
+    // The top-level chunk has the RIFF chunk ID. This is also the file marker.
+    let marker = mss.read_quad_bytes().await?;
+
+    if marker != WAVE_STREAM_MARKER {
+        return unsupported_error("wav: missing wave riff stream marker");
+    }
+
+    // The length of the top-level RIFF chunk. Must be atleast 4 bytes.
+    let riff_len = mss.read_u32().await?;
+
+    if riff_len < 4 {
+        return decode_error("wav: invalid riff length");
+    }
+
+    // The form type. Only the WAVE form is supported.
+    let riff_form = mss.read_quad_bytes().await?;
+
+    if riff_form != WAVE_RIFF_FORM {
+        error!("riff form is not wave ({})", String::from_utf8_lossy(&riff_form));
+
+        return unsupported_error("wav: riff form is not wave");
+    }
+
+    let mut riff_chunks =
+        ChunksReader::<RiffWaveChunks>::new(riff_len - 4, ByteOrder::LittleEndian);
+
+    let mut codec_params = AudioCodecParameters::new();
+    let mut metadata: MetadataLog = Default::default();
+    let mut packet_info = PacketInfo::without_blocks(0);
+    let mut fact = None;
+
+    loop {
+        let chunk = riff_chunks.next(&mut mss).await?;
+
+        // The last chunk should always be a data chunk, if it is not, then the stream is
+        // unsupported.
+        if chunk.is_none() {
+            return unsupported_error("wav: missing data chunk");
         }
 
-        // The length of the top-level RIFF chunk. Must be atleast 4 bytes.
-        let riff_len = mss.read_u32().await?;
+        match chunk.unwrap() {
+            RiffWaveChunks::Format(fmt) => {
+                let format = fmt.parse(&mut mss).await?;
 
-        if riff_len < 4 {
-            return decode_error("wav: invalid riff length");
-        }
+                // The Format chunk contains the block_align field and possible additional information
+                // to handle packetization and seeking.
+                packet_info = format.packet_info()?;
+                codec_params
+                    .with_max_frames_per_packet(packet_info.get_max_frames_per_packet())
+                    .with_frames_per_block(packet_info.frames_per_block);
 
-        // The form type. Only the WAVE form is supported.
-        let riff_form = mss.read_quad_bytes().await?;
-
-        if riff_form != WAVE_RIFF_FORM {
-            error!("riff form is not wave ({})", String::from_utf8_lossy(&riff_form));
-
-            return unsupported_error("wav: riff form is not wave");
-        }
-
-        let mut riff_chunks =
-            ChunksReader::<RiffWaveChunks>::new(riff_len - 4, ByteOrder::LittleEndian);
-
-        let mut codec_params = AudioCodecParameters::new();
-        let mut metadata: MetadataLog = Default::default();
-        let mut packet_info = PacketInfo::without_blocks(0);
-        let mut fact = None;
-
-        loop {
-            let chunk = riff_chunks.next(&mut mss).await?;
-
-            // The last chunk should always be a data chunk, if it is not, then the stream is
-            // unsupported.
-            if chunk.is_none() {
-                return unsupported_error("wav: missing data chunk");
+                // Append Format chunk fields to codec parameters.
+                append_format_params(&mut codec_params, format.format_data, format.sample_rate);
             }
+            RiffWaveChunks::Fact(fct) => {
+                fact = Some(fct.parse(&mut mss).await?);
+            }
+            RiffWaveChunks::List(lst) => {
+                let list = lst.parse(&mut mss).await?;
 
-            match chunk.unwrap() {
-                RiffWaveChunks::Format(fmt) => {
-                    let format = fmt.parse(&mut mss).await?;
-
-                    // The Format chunk contains the block_align field and possible additional information
-                    // to handle packetization and seeking.
-                    packet_info = format.packet_info()?;
-                    codec_params
-                        .with_max_frames_per_packet(packet_info.get_max_frames_per_packet())
-                        .with_frames_per_block(packet_info.frames_per_block);
-
-                    // Append Format chunk fields to codec parameters.
-                    append_format_params(&mut codec_params, format.format_data, format.sample_rate);
+                // Riff Lists can have many different forms, but WavReader only supports Info
+                // lists.
+                match &list.form {
+                    b"INFO" => metadata.push(read_info_chunk(&mut mss, list.len).await?),
+                    _ => list.skip(&mut mss).await?,
                 }
-                RiffWaveChunks::Fact(fct) => {
-                    fact = Some(fct.parse(&mut mss).await?);
+            }
+            RiffWaveChunks::Data(dat) => {
+                let data = dat.parse(&mut mss).await?;
+
+                // Record the bounds of the data chunk.
+                let data_start_pos = mss.pos();
+                let data_end_pos = data_start_pos + u64::from(data.len);
+
+                // Create the track.
+                let mut track = Track::new(0);
+
+                track.with_codec_params(CodecParameters::Audio(codec_params));
+
+                // Append Fact chunk fields to track.
+                if let Some(fact) = &fact {
+                    append_fact_params(&mut track, fact);
                 }
-                RiffWaveChunks::List(lst) => {
-                    let list = lst.parse(&mut mss).await?;
 
-                    // Riff Lists can have many different forms, but WavReader only supports Info
-                    // lists.
-                    match &list.form {
-                        b"INFO" => metadata.push(read_info_chunk(&mut mss, list.len).await?),
-                        _ => list.skip(&mut mss).await?,
-                    }
-                }
-                RiffWaveChunks::Data(dat) => {
-                    let data = dat.parse(&mut mss).await?;
+                // Append Data chunk fields to track.
+                append_data_params(&mut track, data.len as u64, &packet_info);
 
-                    // Record the bounds of the data chunk.
-                    let data_start_pos = mss.pos();
-                    let data_end_pos = data_start_pos + u64::from(data.len);
-
-                    // Create the track.
-                    let mut track = Track::new(0);
-
-                    track.with_codec_params(CodecParameters::Audio(codec_params));
-
-                    // Append Fact chunk fields to track.
-                    if let Some(fact) = &fact {
-                        append_fact_params(&mut track, fact);
-                    }
-
-                    // Append Data chunk fields to track.
-                    append_data_params(&mut track, data.len as u64, &packet_info);
-
-                    // Instantiate the reader.
-                    return Ok(AsyncWavReader {
-                        reader: mss,
-                        tracks: vec![track],
-                        chapters: opts.external_data.chapters,
-                        metadata: opts.external_data.metadata.unwrap_or_default(),
-                        packet_info,
-                        data_start_pos,
-                        data_end_pos,
-                    });
-                }
+                // Instantiate the reader.
+                return Ok(AsyncWavReader {
+                    reader: mss,
+                    tracks: vec![track],
+                    chapters: opts.external_data.chapters,
+                    metadata: opts.external_data.metadata.unwrap_or_default(),
+                    packet_info,
+                    data_start_pos,
+                    data_end_pos,
+                });
             }
         }
     }
@@ -190,10 +195,8 @@ impl<'s> ProbeableFormat<'s> for AsyncWavReader<'_> {
         mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
-        async move {
-            Ok(Box::new(AsyncWavReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
-        }
-        .boxed()
+        async move { Ok(Box::new(try_new_async(mss, opts).await?) as Box<dyn AsyncFormatReader>) }
+            .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
