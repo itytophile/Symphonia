@@ -69,7 +69,7 @@ impl ProbeableFormat<'_> for AsyncCafReader<'_> {
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
         async {
-            Ok(Box::new(AsyncCafReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
+            Ok(Box::new(try_new_async(mss, opts).await?) as Box<dyn AsyncFormatReader>)
         }
         .boxed()
     }
@@ -251,26 +251,33 @@ impl AsyncFormatReader for AsyncCafReader<'_> {
     }
 }
 
+pub async fn try_new_async(
+    mss: AsyncMediaSourceStream<'_>,
+    opts: FormatOptions,
+) -> Result<AsyncCafReader<'_>> {
+    let mut reader = AsyncCafReader {
+        reader: mss,
+        tracks: vec![],
+        chapters: opts.external_data.chapters,
+        metadata: opts.external_data.metadata.unwrap_or_default(),
+        data_start_pos: 0,
+        data_len: None,
+        packet_info: PacketInfo::Unknown,
+    };
+
+    reader.check_file_header().await?;
+    let track = reader.read_chunks().await?;
+
+    reader.tracks.push(track);
+
+    Ok(reader)
+}
+
+pub fn try_new(mss: MediaSourceStream<'_>, opts: FormatOptions) -> Result<CafReader<'_>> {
+    Ok(BlockingFormatReader::new(try_new_async(mss.into_inner(), opts).now_or_never().unwrap()?))
+}
+
 impl<'s> AsyncCafReader<'s> {
-    pub async fn try_new(mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
-        let mut reader = Self {
-            reader: mss,
-            tracks: vec![],
-            chapters: opts.external_data.chapters,
-            metadata: opts.external_data.metadata.unwrap_or_default(),
-            data_start_pos: 0,
-            data_len: None,
-            packet_info: PacketInfo::Unknown,
-        };
-
-        reader.check_file_header().await?;
-        let track = reader.read_chunks().await?;
-
-        reader.tracks.push(track);
-
-        Ok(reader)
-    }
-
     fn time_base(&self) -> Option<TimeBase> {
         self.tracks.first().and_then(|track| track.time_base)
     }
