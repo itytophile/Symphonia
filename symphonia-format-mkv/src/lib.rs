@@ -21,7 +21,7 @@ mod element_ids;
 mod lacing;
 mod segment;
 
-pub use crate::demuxer::AsyncMkvReader;
+pub use crate::demuxer::{AsyncMkvReader, MkvReader};
 
 pub mod sub_fields {
     //! Key name constants for sub-fields of MKV tags and chapters.

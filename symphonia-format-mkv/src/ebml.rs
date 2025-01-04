@@ -6,9 +6,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::future::Future;
-use std::io::{self, SeekFrom};
+use std::io::SeekFrom;
 
-use symphonia_core::async_trait;
+use futures_util::future::BoxFuture;
+use futures_util::FutureExt;
 use symphonia_core::errors::{decode_error, seek_error, Error, Result, SeekErrorKind};
 use symphonia_core::io::{MediaSourceStream, ReadBytes};
 use symphonia_core::util::bits::sign_extend_leq64_to_i64;
@@ -192,9 +193,9 @@ pub struct ElementHeader {
 
 impl ElementHeader {
     /// Returns an iterator over child elements of the current element.
-    pub(crate) fn children<'a, 's>(&self, reader: &'a mut MediaSourceStream<'s>) -> Result<ElementIterator<'a, 's>> {
+    pub(crate) fn children(&self, reader: &MediaSourceStream<'_>) -> Result<ElementIterator> {
         assert_eq!(reader.pos(), self.data_pos, "unexpected position");
-        ElementIterator::new_of(reader, *self)
+        ElementIterator::new_of(*self)
     }
 
     pub(crate) fn end(&self) -> Option<u64> {
@@ -209,7 +210,11 @@ impl ElementHeader {
 
 pub trait Element: Sized {
     const ID: ElementType;
-    fn read(it: ElementIterator<'_, '_>, header: ElementHeader) -> impl Future<Output = Result<Self>> + Send;
+    fn read<'a>(
+        it: ElementIterator,
+        header: ElementHeader,
+        reader: &'a mut MediaSourceStream<'_>,
+    ) -> impl Future<Output = Result<Self>> + 'a + Send;
 }
 
 impl ElementHeader {
@@ -249,15 +254,14 @@ impl Element for EbmlElement {
     const ID: ElementType = ElementType::Ebml;
 
     async fn read(
-        mut it: ElementIterator<'_, '_>,
+        mut it: ElementIterator,
         _header: ElementHeader,
+        reader: &mut MediaSourceStream<'_>,
     ) -> Result<Self> {
-        Ok(Self { header: it.read_element_data::<EbmlHeaderElement>().await? })
+        Ok(Self { header: it.read_element_data::<EbmlHeaderElement>(reader).await? })
     }
 }
-pub(crate) struct ElementIterator<'a, 's> {
-    /// Reader of the stream containing this element.
-    reader: &'a mut MediaSourceStream<'s>,
+pub(crate) struct ElementIterator {
     /// Store current element header (for sanity check purposes).
     current: Option<ElementHeader>,
     /// Position of the next element header that would be read.
@@ -268,51 +272,52 @@ pub(crate) struct ElementIterator<'a, 's> {
     depth: u8,
 }
 
-impl<'a, 's> ElementIterator<'a, 's> {
+impl ElementIterator {
     /// Creates a new iterator over elements starting from the current stream position.
-    pub(crate) fn new(reader: &'a mut MediaSourceStream<'s>, end: Option<u64>) -> Self {
+    pub(crate) fn new(reader: &MediaSourceStream<'_>, end: Option<u64>) -> Self {
         // Creates a new iterator over elements starting from the given stream position.
         let next_pos = reader.pos();
-        Self { reader, current: None, next_pos, end, depth: 0 }
+        Self { current: None, next_pos, end, depth: 0 }
     }
 
     /// Creates a new iterator over children of the given parent element.
-    fn new_of(reader: &'a mut MediaSourceStream<'s>, parent: ElementHeader) -> Result<Self> {
+    fn new_of(parent: ElementHeader) -> Result<Self> {
         let depth = parent
             .depth
             .checked_add(1)
             .filter(|&depth| depth < 16)
             .ok_or(Error::DecodeError("mkv: element recursion limit reached"))?;
 
-        Ok(Self {
-            reader,
-            current: Some(parent),
-            next_pos: parent.data_pos,
-            end: parent.end(),
-            depth,
-        })
+        Ok(Self { current: Some(parent), next_pos: parent.data_pos, end: parent.end(), depth })
     }
 
     /// Seek to a specified offset inside of the stream.
-    pub(crate) async fn seek(&mut self, pos: u64) -> Result<()> {
-        let current_pos = self.pos();
+    pub(crate) async fn seek(
+        &mut self,
+        reader: &mut MediaSourceStream<'_>,
+        pos: u64,
+    ) -> Result<()> {
+        let current_pos = reader.pos();
         self.current = None;
-        if self.reader.is_seekable() {
-            self.reader.seek(SeekFrom::Start(pos)).await?;
+        if reader.is_seekable() {
+            reader.seek(SeekFrom::Start(pos)).await?;
         }
         else if pos < current_pos {
             return seek_error(SeekErrorKind::ForwardOnly);
         }
         else {
-            self.reader.ignore_bytes(pos - current_pos).await?;
+            reader.ignore_bytes(pos - current_pos).await?;
         }
         self.next_pos = pos;
         Ok(())
     }
 
     /// Reads a single element header and moves to its next sibling by ignoring all the children.
-    pub(crate) async fn read_header(&mut self) -> Result<Option<ElementHeader>> {
-        let header = self.read_header_no_consume().await?;
+    pub(crate) async fn read_header(
+        &mut self,
+        reader: &mut MediaSourceStream<'_>,
+    ) -> Result<Option<ElementHeader>> {
+        let header = self.read_header_no_consume(reader).await?;
         if let Some(header) = &header {
             // Move to next sibling.
             self.next_pos += header.len;
@@ -322,8 +327,11 @@ impl<'a, 's> ElementIterator<'a, 's> {
 
     /// Reads a single element header and shifts the stream to element's child
     /// if it'a a master element or to next sibling otherwise.
-    pub(crate) async fn read_child_header(&mut self) -> Result<Option<ElementHeader>> {
-        let header = self.read_header_no_consume().await?;
+    pub(crate) async fn read_child_header(
+        &mut self,
+        reader: &mut MediaSourceStream<'_>,
+    ) -> Result<Option<ElementHeader>> {
+        let header = self.read_header_no_consume(reader).await?;
         if let Some(header) = &header {
             match ELEMENTS.get(&header.tag).map(|it| it.0) {
                 Some(Type::Master) => {
@@ -342,22 +350,25 @@ impl<'a, 's> ElementIterator<'a, 's> {
     /// Reads element header at the current stream position
     /// without moving to the end of the parent element.
     /// Returns [None] if the current element has no more children or reached end of the stream.
-    async fn read_header_no_consume(&mut self) -> Result<Option<ElementHeader>> {
-        let pos = self.reader.pos();
+    async fn read_header_no_consume(
+        &mut self,
+        reader: &mut MediaSourceStream<'_>,
+    ) -> Result<Option<ElementHeader>> {
+        let pos = reader.pos();
         if pos < self.next_pos {
             // Ignore bytes that were not read
-            self.reader.ignore_bytes(self.next_pos - pos).await?;
+            reader.ignore_bytes(self.next_pos - pos).await?;
         }
 
-        assert_eq!(self.next_pos, self.reader.pos(), "invalid position");
+        assert_eq!(self.next_pos, reader.pos(), "invalid position");
 
-        if self.reader.pos() < self.end.unwrap_or(u64::MAX) {
-            let (header, reset) = ElementHeader::read(&mut self.reader, self.depth).await?;
+        if reader.pos() < self.end.unwrap_or(u64::MAX) {
+            let (header, reset) = ElementHeader::read(reader, self.depth).await?;
             if reset {
                 // After finding a new top-level element in a broken stream
                 // it is necessary to update `next_pos` so it refers to a position
                 // of a child header.
-                self.next_pos = self.reader.pos();
+                self.next_pos = reader.pos();
             }
             self.current = Some(header);
             return Ok(Some(header));
@@ -367,32 +378,45 @@ impl<'a, 's> ElementIterator<'a, 's> {
     }
 
     /// Reads a single element with its data.
-    pub(crate) async fn read_element<E: Element>(&mut self) -> Result<E> {
-        let _header = self.read_header().await?;
-        self.read_element_data().await
+    pub(crate) async fn read_element<E: Element>(
+        &mut self,
+        reader: &mut MediaSourceStream<'_>,
+    ) -> Result<E> {
+        let _header = self.read_header(reader).await?;
+        self.read_element_data(reader).await
     }
 
     /// Reads data of current element. Must be used after
     /// [Self::read_header] or [Self::read_child_header].
-    pub(crate) async fn read_element_data<E: Element>(&mut self) -> Result<E> {
-        let header = self.current.expect("EBML header must be read before calling this function");
+    pub(crate) fn read_element_data<'a, E: Element>(
+        &'a mut self,
+        reader: &'a mut MediaSourceStream<'_>,
+    ) -> BoxFuture<'a, Result<E>> {
+        async move {
+            let header =
+                self.current.expect("EBML header must be read before calling this function");
 
-        // Ensure the EBML element header has the same element type as the one being read.
-        if header.etype != E::ID {
-            return decode_error("mkv: unexpected EBML element");
+            // Ensure the EBML element header has the same element type as the one being read.
+            if header.etype != E::ID {
+                return decode_error("mkv: unexpected EBML element");
+            }
+
+            let it = header.children(reader)?;
+            let element = E::read(it, header, reader).await?;
+            // Update position to match the position element reader finished at
+            self.next_pos = reader.pos();
+            Ok(element)
         }
-
-        let it = header.children(&mut self.reader)?;
-        let element = E::read(it, header).await?;
-        // Update position to match the position element reader finished at
-        self.next_pos = self.reader.pos();
-        Ok(element)
+        .boxed() // boxed because recursive
     }
 
     /// Reads a collection of element with the given type.
-    pub(crate) async fn read_elements<E: Element>(&mut self) -> Result<Box<[E]>> {
+    pub(crate) async fn read_elements<E: Element>(
+        &mut self,
+        reader: &mut MediaSourceStream<'_>,
+    ) -> Result<Box<[E]>> {
         let mut elements = vec![];
-        while let Some(header) = self.read_header().await? {
+        while let Some(header) = self.read_header(reader).await? {
             if header.etype == ElementType::Crc32 {
                 // TODO: ignore crc for now
                 continue;
@@ -400,54 +424,63 @@ impl<'a, 's> ElementIterator<'a, 's> {
 
             if header.etype != E::ID {
                 log::warn!("found element with invalid type {:?}", header);
-                self.ignore_data().await?;
+                self.ignore_data(reader).await?;
                 continue;
             }
 
-            let it = header.children(&mut self.reader)?;
+            let it = header.children(reader)?;
 
-            elements.push(E::read(it, header).await?);
+            elements.push(E::read(it, header, reader).await?);
         }
         Ok(elements.into_boxed_slice())
     }
 
     /// Reads any primitive data inside of the current element.
-    pub(crate) async fn read_data(&mut self) -> Result<ElementData> {
+    pub(crate) async fn read_data(
+        &mut self,
+        reader: &mut MediaSourceStream<'_>,
+    ) -> Result<ElementData> {
         let hdr = self.current.expect("not in an element");
         let value = self
-            .try_read_data(hdr)
+            .try_read_data(hdr, reader)
             .await?
             .ok_or(Error::DecodeError("mkv: element has no primitive data"))?;
         Ok(value)
     }
 
     /// Reads data of the current element as an unsigned integer.
-    pub(crate) async fn read_u64(&mut self) -> Result<u64> {
-        match self.read_data().await? {
+    pub(crate) async fn read_u64(&mut self, reader: &mut MediaSourceStream<'_>) -> Result<u64> {
+        match self.read_data(reader).await? {
             ElementData::UnsignedInt(s) => Ok(s),
             _ => Err(Error::DecodeError("mkv: expected an unsigned int")),
         }
     }
 
     /// Reads data of the current element as a floating-point number.
-    pub(crate) async fn read_f64(&mut self) -> Result<f64> {
-        match self.read_data().await? {
+    pub(crate) async fn read_f64(&mut self, reader: &mut MediaSourceStream<'_>) -> Result<f64> {
+        match self.read_data(reader).await? {
             ElementData::Float(s) => Ok(s),
             _ => Err(Error::DecodeError("mkv: expected a float")),
         }
     }
 
     /// Reads data of the current element as a string.
-    pub(crate) async fn read_string(&mut self) -> Result<String> {
-        match self.read_data().await? {
+    pub(crate) async fn read_string(
+        &mut self,
+        reader: &mut MediaSourceStream<'_>,
+    ) -> Result<String> {
+        match self.read_data(reader).await? {
             ElementData::String(s) => Ok(s),
             _ => Err(Error::DecodeError("mkv: expected a string")),
         }
     }
 
     /// Reads binary data of the current element as boxed slice.
-    pub(crate) async fn read_boxed_slice(&mut self) -> Result<Box<[u8]>> {
-        match self.read_data().await? {
+    pub(crate) async fn read_boxed_slice(
+        &mut self,
+        reader: &mut MediaSourceStream<'_>,
+    ) -> Result<Box<[u8]>> {
+        match self.read_data(reader).await? {
             ElementData::Binary(b) => Ok(b),
             _ => Err(Error::DecodeError("mkv: expected binary data")),
         }
@@ -458,12 +491,13 @@ impl<'a, 's> ElementIterator<'a, 's> {
     pub(crate) async fn try_read_data(
         &mut self,
         header: ElementHeader,
+        reader: &mut MediaSourceStream<'_>,
     ) -> Result<Option<ElementData>> {
         Ok(match ELEMENTS.get(&header.tag) {
             Some((ty, _)) => {
                 // Position must always be valid, because this function is called
                 // after reading the element header.
-                assert_eq!(header.data_pos, self.reader.pos(), "invalid stream position");
+                assert_eq!(header.data_pos, reader.pos(), "invalid stream position");
                 if let (Some(cur), Some(end)) = (self.current, self.end) {
                     if cur.pos + cur.len > end {
                         log::debug!("reading element data {:?}; parent end={}", cur, end);
@@ -478,25 +512,25 @@ impl<'a, 's> ElementIterator<'a, 's> {
                     }
                     Type::Unsigned => {
                         if header.data_len > 8 {
-                            self.ignore_data().await?;
+                            self.ignore_data(reader).await?;
                             return decode_error("mkv: invalid unsigned integer length");
                         }
 
                         let mut buff = [0u8; 8];
                         let offset = 8 - header.data_len as usize;
-                        self.reader.read_buf_exact(&mut buff[offset..]).await?;
+                        reader.read_buf_exact(&mut buff[offset..]).await?;
                         let value = u64::from_be_bytes(buff);
                         ElementData::UnsignedInt(value)
                     }
                     Type::Signed | Type::Date => {
                         if header.data_len > 8 {
-                            self.ignore_data().await?;
+                            self.ignore_data(reader).await?;
                             return decode_error("mkv: invalid signed integer length");
                         }
 
                         let len = header.data_len as usize;
                         let mut buff = [0u8; 8];
-                        self.reader.read_buf_exact(&mut buff[8 - len..]).await?;
+                        reader.read_buf_exact(&mut buff[8 - len..]).await?;
                         let value = u64::from_be_bytes(buff);
                         let value = sign_extend_leq64_to_i64(value, (len as u32) * 8);
 
@@ -509,23 +543,22 @@ impl<'a, 's> ElementIterator<'a, 's> {
                     Type::Float => {
                         let value = match header.data_len {
                             0 => 0.0,
-                            4 => self.reader.read_be_f32().await? as f64,
-                            8 => self.reader.read_be_f64().await?,
+                            4 => reader.read_be_f32().await? as f64,
+                            8 => reader.read_be_f64().await?,
                             _ => {
-                                self.ignore_data().await?;
+                                self.ignore_data(reader).await?;
                                 return Err(Error::DecodeError("mkv: invalid float length"));
                             }
                         };
                         ElementData::Float(value)
                     }
                     Type::String => {
-                        let data =
-                            self.reader.read_boxed_slice_exact(header.data_len as usize).await?;
+                        let data = reader.read_boxed_slice_exact(header.data_len as usize).await?;
                         let bytes = data.split(|b| *b == 0).next().unwrap_or(&data);
                         ElementData::String(String::from_utf8_lossy(bytes).into_owned())
                     }
                     Type::Binary => ElementData::Binary(
-                        self.reader.read_boxed_slice_exact(header.data_len as usize).await?,
+                        reader.read_boxed_slice_exact(header.data_len as usize).await?,
                     ),
                 })
             }
@@ -535,18 +568,13 @@ impl<'a, 's> ElementIterator<'a, 's> {
 
     /// Ignores content of the current element. It can be used after calling
     /// [Self::read_child_header] to ignore children of a master element.
-    pub(crate) async fn ignore_data(&mut self) -> Result<()> {
+    pub(crate) async fn ignore_data(&mut self, reader: &mut MediaSourceStream<'_>) -> Result<()> {
         if let Some(header) = self.current {
             log::debug!("ignoring data of {:?} element", header.etype);
-            self.reader.ignore_bytes(header.data_len).await?;
+            reader.ignore_bytes(header.data_len).await?;
             self.next_pos = header.data_pos + header.data_len;
         }
         Ok(())
-    }
-
-    /// Gets the position of the underlying stream.
-    pub(crate) fn pos(&self) -> u64 {
-        self.reader.pos()
     }
 }
 
