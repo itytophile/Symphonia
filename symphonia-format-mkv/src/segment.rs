@@ -45,7 +45,7 @@ pub(crate) struct TrackElement {
 impl Element for TrackElement {
     const ID: ElementType = ElementType::TrackEntry;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -157,7 +157,7 @@ pub(crate) struct AudioElement {
 impl Element for AudioElement {
     const ID: ElementType = ElementType::Audio;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -205,7 +205,7 @@ pub(crate) struct VideoElement {
 impl Element for VideoElement {
     const ID: ElementType = ElementType::Video;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -238,7 +238,7 @@ pub(crate) struct BlockAdditionMappingElement {
 impl Element for BlockAdditionMappingElement {
     const ID: ElementType = ElementType::BlockAdditionMapping;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -285,7 +285,7 @@ pub(crate) struct SeekHeadElement {
 impl Element for SeekHeadElement {
     const ID: ElementType = ElementType::SeekHead;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -315,7 +315,7 @@ pub(crate) struct SeekElement {
 impl Element for SeekElement {
     const ID: ElementType = ElementType::Seek;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -351,7 +351,7 @@ pub(crate) struct TracksElement {
 impl Element for TracksElement {
     const ID: ElementType = ElementType::Tracks;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -374,7 +374,7 @@ pub(crate) struct EbmlHeaderElement {
 impl Element for EbmlHeaderElement {
     const ID: ElementType = ElementType::Ebml;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -440,7 +440,7 @@ pub(crate) struct InfoElement {
 impl Element for InfoElement {
     const ID: ElementType = ElementType::Info;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -492,7 +492,7 @@ pub(crate) struct CuesElement {
 impl Element for CuesElement {
     const ID: ElementType = ElementType::Cues;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -510,7 +510,7 @@ pub(crate) struct CuePointElement {
 impl Element for CuePointElement {
     const ID: ElementType = ElementType::CuePoint;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -545,7 +545,7 @@ pub(crate) struct CueTrackPositionsElement {
 impl Element for CueTrackPositionsElement {
     const ID: ElementType = ElementType::CueTrackPositions;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -581,7 +581,7 @@ pub(crate) struct BlockGroupElement {
 impl Element for BlockGroupElement {
     const ID: ElementType = ElementType::BlockGroup;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -628,7 +628,7 @@ pub(crate) struct ClusterElement {
 impl Element for ClusterElement {
     const ID: ElementType = ElementType::Cluster;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         header: ElementHeader,
     ) -> Result<Self> {
@@ -688,7 +688,7 @@ pub(crate) struct TagsElement {
 impl Element for TagsElement {
     const ID: ElementType = ElementType::Tags;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -735,7 +735,7 @@ pub(crate) struct TagElement {
 impl Element for TagElement {
     const ID: ElementType = ElementType::Tag;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -765,7 +765,7 @@ pub(crate) struct SimpleTagElement {
 impl Element for SimpleTagElement {
     const ID: ElementType = ElementType::SimpleTag;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -804,7 +804,7 @@ pub(crate) struct AttachedFileElement {
 impl Element for AttachedFileElement {
     const ID: ElementType = ElementType::AttachedFile;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -854,7 +854,7 @@ pub(crate) struct AttachmentsElement {
 impl Element for AttachmentsElement {
     const ID: ElementType = ElementType::Attachments;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -883,7 +883,7 @@ pub(crate) struct ChaptersElement {
 impl Element for ChaptersElement {
     const ID: ElementType = ElementType::Chapters;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -917,7 +917,7 @@ pub(crate) struct EditionEntryElement {
 impl Element for EditionEntryElement {
     const ID: ElementType = ElementType::EditionEntry;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -1010,7 +1010,7 @@ pub(crate) struct EditionDisplayElement {
 impl Element for EditionDisplayElement {
     const ID: ElementType = ElementType::EditionDisplay;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -1053,7 +1053,7 @@ pub(crate) struct ChapterAtomElement {
 impl Element for ChapterAtomElement {
     const ID: ElementType = ElementType::ChapterAtom;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {
@@ -1208,7 +1208,7 @@ pub(crate) struct ChapterDisplayElement {
 impl Element for ChapterDisplayElement {
     const ID: ElementType = ElementType::ChapterDisplay;
 
-    async fn read<R: ElementReader>(
+    async fn read<'s, R: ElementReader<'s>>(
         mut it: ElementIterator<R>,
         _header: ElementHeader,
     ) -> Result<Self> {

@@ -24,7 +24,7 @@ use symphonia_core::{async_trait, io::*};
 use log::{info, warn};
 
 use crate::codecs::make_track_codec_params;
-use crate::ebml::{EbmlElement, ElementHeader, ElementIterator, OwnedElementReader};
+use crate::ebml::{EbmlElement, ElementHeader, ElementIterator};
 use crate::element_ids::{ElementType, ELEMENTS};
 use crate::lacing::{extract_frames, Frame};
 use crate::segment::{
@@ -48,7 +48,7 @@ pub struct TrackState {
 /// `MkvReader` implements a demuxer for the Matroska and WebM formats.
 pub struct AsyncMkvReader<'s> {
     /// Iterator over EBML element headers
-    iter: ElementIterator<OwnedElementReader<'s>>,
+    iter: ElementIterator<MediaSourceStream<'s>>,
     tracks: Vec<Track>,
     track_states: HashMap<u32, TrackState>,
     current_cluster: Option<ClusterState>,
@@ -78,7 +78,7 @@ impl<'s> AsyncMkvReader<'s> {
             _ => (),
         }
 
-        let mut it = ElementIterator::new(OwnedElementReader::new(mss), total_len);
+        let mut it = ElementIterator::new(mss, total_len);
         let ebml = it.read_element::<EbmlElement>().await?;
 
         if !matches!(ebml.header.doc_type.as_str(), "matroska" | "webm") {
