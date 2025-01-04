@@ -76,13 +76,24 @@ pub struct MediaSourceStream<'s> {
     rel_pos: u64,
 }
 
+pub struct BlockingMediaSourceStream<'s>(MediaSourceStream<'s>);
+
+impl<'s> BlockingMediaSourceStream<'s> {
+    pub fn new(source: impl MediaSource + 's, options: MediaSourceStreamOptions) -> Self {
+        Self(MediaSourceStream::new(
+            Box::pin(AllowStdIo::new(source)) as Pin<Box<dyn AsyncMediaSource>>,
+            options,
+        ))
+    }
+
+    pub fn into_inner(self) -> MediaSourceStream<'s> {
+        self.0
+    }
+}
+
 impl<'s> MediaSourceStream<'s> {
     const MIN_BLOCK_LEN: usize = 1 * 1024;
     const MAX_BLOCK_LEN: usize = 32 * 1024;
-
-    pub fn new_blocking(source: impl MediaSource + 's, options: MediaSourceStreamOptions) -> Self {
-        Self::new(Box::pin(AllowStdIo::new(source)) as Pin<Box<dyn AsyncMediaSource>>, options)
-    }
 
     pub fn new(
         source: Pin<Box<dyn AsyncMediaSource + 's>>,

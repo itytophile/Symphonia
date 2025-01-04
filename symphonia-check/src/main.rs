@@ -25,7 +25,7 @@ use symphonia::core::formats::{
     AsyncFormatReader, BlockingFormatReader, FormatOptions, FormatReader, FormatReaderInfo,
     TrackType,
 };
-use symphonia::core::io::{MediaSourceStream, ReadOnlySource};
+use symphonia::core::io::{BlockingMediaSourceStream, ReadOnlySource};
 use symphonia::core::meta::MetadataOptions;
 
 use clap::Arg;
@@ -152,7 +152,7 @@ struct DecoderInstance {
 
 impl DecoderInstance {
     fn try_open(
-        mss: MediaSourceStream<'static>,
+        mss: BlockingMediaSourceStream<'static>,
         fmt_opts: FormatOptions,
     ) -> Result<DecoderInstance> {
         // Use the default options for metadata and format readers, and the decoder.
@@ -352,7 +352,7 @@ fn run_test(path: &str, opts: &TestOptions, result: &mut TestResult) -> Result<(
     let mut ref_process = RefProcess::try_spawn(opts.ref_decoder, opts.gapless, path)?;
 
     // 2. Instantiate a Symphonia decoder for the reference process output.
-    let ref_mss = MediaSourceStream::new_blocking(
+    let ref_mss = BlockingMediaSourceStream::new(
         ReadOnlySource::new(ref_process.child.stdout.take().unwrap()),
         Default::default(),
     );
@@ -360,7 +360,7 @@ fn run_test(path: &str, opts: &TestOptions, result: &mut TestResult) -> Result<(
     let mut ref_inst = DecoderInstance::try_open(ref_mss, Default::default())?;
 
     // 3. Instantiate a Symphonia decoder for the test target.
-    let tgt_mss = MediaSourceStream::new_blocking(File::open(Path::new(path))?, Default::default());
+    let tgt_mss = BlockingMediaSourceStream::new(File::open(Path::new(path))?, Default::default());
 
     let tgt_fmt_opts = FormatOptions { enable_gapless: opts.gapless, ..Default::default() };
 

@@ -2,9 +2,11 @@ use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error;
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia_core::formats::{FormatReader, FormatReaderInfo, TrackType};
+use symphonia_core::{
+    formats::{FormatReader, FormatReaderInfo, TrackType},
+    io::BlockingMediaSourceStream,
+};
 
 fn main() {
     // Get the first command line argument.
@@ -12,7 +14,7 @@ fn main() {
     let path = args.get(1).expect("file path not provided");
 
     // Create the media source stream.
-    let mss = MediaSourceStream::new_blocking(
+    let mss = BlockingMediaSourceStream::new(
         std::fs::File::open(path).expect("failed to open media"),
         Default::default(),
     );

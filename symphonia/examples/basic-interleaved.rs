@@ -7,9 +7,11 @@ use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error;
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia_core::formats::{FormatReader, FormatReaderInfo, TrackType};
+use symphonia_core::{
+    formats::{FormatReader, FormatReaderInfo, TrackType},
+    io::BlockingMediaSourceStream,
+};
 
 fn main() {
     // Get command line arguments.
@@ -20,7 +22,7 @@ fn main() {
     let file = File::open(Path::new(&args[1])).unwrap();
 
     // Create the media source stream using the boxed media source from above.
-    let mss = MediaSourceStream::new_blocking(file, Default::default());
+    let mss = BlockingMediaSourceStream::new(file, Default::default());
 
     // Create a hint to help the format registry guess what format reader is appropriate. In this
     // example we'll leave it empty.

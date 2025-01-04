@@ -13,7 +13,9 @@ use std::io::SeekFrom;
 use crate::common::Tier;
 use crate::errors::{unsupported_error, Error, Result};
 use crate::formats::{FormatInfo, FormatOptions};
-use crate::io::{MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered};
+use crate::io::{
+    BlockingMediaSourceStream, MediaSourceStream, ReadBytes, ScopedStream, SeekBuffered,
+};
 use crate::meta::{MetadataInfo, MetadataOptions, MetadataReader, MetadataSideData};
 
 use futures_util::future::BoxFuture;
@@ -457,12 +459,12 @@ impl Probe {
     pub fn probe_blocking<'s>(
         &self,
         hint: &Hint,
-        mss: MediaSourceStream<'s>,
+        mss: BlockingMediaSourceStream<'s>,
         fmt_opts: FormatOptions,
         meta_opts: MetadataOptions,
     ) -> Result<BlockingFormatReader<Box<dyn AsyncFormatReader + 's>>> {
         Ok(BlockingFormatReader::new(
-            self.probe(hint, mss, fmt_opts, meta_opts).now_or_never().unwrap()?,
+            self.probe(hint, mss.into_inner(), fmt_opts, meta_opts).now_or_never().unwrap()?,
         ))
     }
 

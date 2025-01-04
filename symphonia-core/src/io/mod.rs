@@ -33,7 +33,9 @@ pub use buf_reader::BufReader;
 use futures_util::io::AllowStdIo;
 use futures_util::AsyncRead;
 use futures_util::AsyncSeek;
-pub use media_source_stream::{MediaSourceStream, MediaSourceStreamOptions};
+pub use media_source_stream::{
+    BlockingMediaSourceStream, MediaSourceStream, MediaSourceStreamOptions,
+};
 pub use monitor_stream::{Monitor, MonitorStream};
 pub use scoped_stream::ScopedStream;
 
