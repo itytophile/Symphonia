@@ -39,7 +39,7 @@ pub use media_source_stream::{
 pub use monitor_stream::{Monitor, MonitorStream};
 pub use scoped_stream::ScopedStream;
 
-pub trait AsyncMediaSource: AsyncRead + AsyncSeek + Send + Sync {
+pub trait AsyncMediaSource: AsyncRead + AsyncSeek + Send {
     /// Returns if the source is seekable. This may be an expensive operation.
     fn is_seekable(&self) -> bool;
 
@@ -52,7 +52,7 @@ pub trait AsyncMediaSource: AsyncRead + AsyncSeek + Send + Sync {
 ///
 /// Despite requiring the [`std::io::Seek`] trait, seeking is an optional capability that can be
 /// queried at runtime.
-pub trait MediaSource: io::Read + io::Seek + Send + Sync {
+pub trait MediaSource: io::Read + io::Seek + Send {
     /// Returns if the source is seekable. This may be an expensive operation.
     fn is_seekable(&self) -> bool;
 
@@ -158,7 +158,7 @@ impl<R: io::Read + Send> ReadOnlySource<R> {
     }
 }
 
-impl<R: io::Read + Send + Sync> MediaSource for ReadOnlySource<R> {
+impl<R: io::Read + Send> MediaSource for ReadOnlySource<R> {
     fn is_seekable(&self) -> bool {
         false
     }

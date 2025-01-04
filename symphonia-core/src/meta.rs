@@ -801,7 +801,7 @@ pub struct MetadataBuffer {
 
 /// A `MetadataReader` reads and decodes metadata and produces a revision of that decoded metadata.
 #[async_trait]
-pub trait MetadataReader: Send + Sync {
+pub trait MetadataReader: Send {
     /// Get basic information about the metadata format.
     fn metadata_info(&self) -> &MetadataInfo;
 

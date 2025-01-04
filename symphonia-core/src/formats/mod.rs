@@ -422,7 +422,7 @@ pub trait FormatReaderInfo {
 }
 
 #[async_trait]
-pub trait AsyncFormatReader: FormatReaderInfo + Send + Sync {
+pub trait AsyncFormatReader: FormatReaderInfo + Send {
     async fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo>;
 
     async fn next_packet(&mut self) -> Result<Option<Packet>>;
@@ -444,7 +444,7 @@ pub trait AsyncFormatReader: FormatReaderInfo + Send + Sync {
 /// `FormatReader` provides an Iterator-like interface over packets for easy consumption and
 /// filtering. Seeking will invalidate the state of any `Decoder` processing packets from the
 /// `FormatReader` and should be reset after a successful seek operation.
-pub trait FormatReader: FormatReaderInfo + Send + Sync {
+pub trait FormatReader: FormatReaderInfo + Send {
     /// Seek, as precisely as possible depending on the mode, to the `Time` or track `TimeStamp`
     /// requested. Returns the requested and actual `TimeStamps` seeked to, as well as the `Track`.
     ///
@@ -511,7 +511,7 @@ impl<T: AsyncFormatReader> FormatReaderInfo for BlockingFormatReader<T> {
     }
 }
 
-impl<T: AsyncFormatReader + Send + Sync> FormatReader for BlockingFormatReader<T> {
+impl<T: AsyncFormatReader + Send> FormatReader for BlockingFormatReader<T> {
     fn seek(&mut self, mode: SeekMode, to: SeekTo) -> Result<SeekedTo> {
         self.0.seek(mode, to).now_or_never().unwrap()
     }
