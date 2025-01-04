@@ -5,7 +5,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::ops::DerefMut;
 use std::sync::Arc;
 
 use symphonia_core::codecs::video::well_known::extra_data::{
@@ -14,7 +13,7 @@ use symphonia_core::codecs::video::well_known::extra_data::{
 use symphonia_core::codecs::video::VideoExtraData;
 use symphonia_core::errors::{Error, Result};
 use symphonia_core::formats::TrackFlags;
-use symphonia_core::io::{BufReader, MediaSourceStream};
+use symphonia_core::io::BufReader;
 use symphonia_core::meta::{
     Chapter, ChapterGroup, ChapterGroupItem, MetadataBuilder, MetadataRevision, RawTag,
     RawTagSubField, RawValue, StandardTag, Tag,
@@ -22,7 +21,7 @@ use symphonia_core::meta::{
 use symphonia_core::units::Time;
 
 use crate::ebml::{
-    read_unsigned_vint, Element, ElementData, ElementHeader, ElementIterator,
+    read_unsigned_vint, Element, ElementData, ElementHeader, ElementIterator, ElementReader,
 };
 use crate::element_ids::ElementType;
 use crate::lacing::calc_abs_block_timestamp;
@@ -46,7 +45,10 @@ pub(crate) struct TrackElement {
 impl Element for TrackElement {
     const ID: ElementType = ElementType::TrackEntry;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut number = None;
         let mut uid = None;
         let mut language = None;
@@ -64,61 +66,61 @@ impl Element for TrackElement {
                     number = Some(it.read_u64().await?);
                 }
                 ElementType::TrackUid => {
-                    uid = Some(it.read_u64()?);
+                    uid = Some(it.read_u64().await?);
                 }
                 ElementType::Language => {
-                    language = Some(it.read_string()?);
+                    language = Some(it.read_string().await?);
                 }
                 ElementType::CodecId => {
-                    codec_id = Some(it.read_string()?);
+                    codec_id = Some(it.read_string().await?);
                 }
                 ElementType::CodecPrivate => {
-                    codec_private = Some(it.read_boxed_slice()?);
+                    codec_private = Some(it.read_boxed_slice().await?);
                 }
                 ElementType::Audio => {
-                    audio = Some(it.read_element_data()?);
+                    audio = Some(it.read_element_data().await?);
                 }
                 ElementType::Video => {
-                    video = Some(it.read_element_data()?);
+                    video = Some(it.read_element_data().await?);
                 }
                 ElementType::BlockAdditionMapping => {
-                    block_addition_mappings.push(it.read_element_data()?);
+                    block_addition_mappings.push(it.read_element_data().await?);
                 }
                 ElementType::DefaultDuration => {
-                    default_duration = Some(it.read_u64()?);
+                    default_duration = Some(it.read_u64().await?);
                 }
                 ElementType::FlagDefault => {
-                    if it.read_u64()? == 1 {
+                    if it.read_u64().await? == 1 {
                         flags |= TrackFlags::DEFAULT;
                     }
                 }
                 ElementType::FlagForced => {
-                    if it.read_u64()? == 1 {
+                    if it.read_u64().await? == 1 {
                         flags |= TrackFlags::FORCED;
                     }
                 }
                 ElementType::FlagHearingImpaired => {
-                    if it.read_u64()? == 1 {
+                    if it.read_u64().await? == 1 {
                         flags |= TrackFlags::HEARING_IMPAIRED;
                     }
                 }
                 ElementType::FlagVisualImpaired => {
-                    if it.read_u64()? == 1 {
+                    if it.read_u64().await? == 1 {
                         flags |= TrackFlags::VISUALLY_IMPAIRED;
                     }
                 }
                 ElementType::FlagTextDescriptions => {
-                    if it.read_u64()? == 1 {
+                    if it.read_u64().await? == 1 {
                         flags |= TrackFlags::TEXT_DESCRIPTIONS;
                     }
                 }
                 ElementType::FlagOriginal => {
-                    if it.read_u64()? == 1 {
+                    if it.read_u64().await? == 1 {
                         flags |= TrackFlags::ORIGINAL_LANGUAGE;
                     }
                 }
                 ElementType::FlagCommentary => {
-                    if it.read_u64()? == 1 {
+                    if it.read_u64().await? == 1 {
                         flags |= TrackFlags::COMMENTARY;
                     }
                 }
@@ -155,25 +157,28 @@ pub(crate) struct AudioElement {
 impl Element for AudioElement {
     const ID: ElementType = ElementType::Audio;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut sampling_frequency = None;
         let mut output_sampling_frequency = None;
         let mut channels = None;
         let mut bit_depth = None;
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::SamplingFrequency => {
-                    sampling_frequency = Some(it.read_f64()?);
+                    sampling_frequency = Some(it.read_f64().await?);
                 }
                 ElementType::OutputSamplingFrequency => {
-                    output_sampling_frequency = Some(it.read_f64()?);
+                    output_sampling_frequency = Some(it.read_f64().await?);
                 }
                 ElementType::Channels => {
-                    channels = Some(it.read_u64()?);
+                    channels = Some(it.read_u64().await?);
                 }
                 ElementType::BitDepth => {
-                    bit_depth = Some(it.read_u64()?);
+                    bit_depth = Some(it.read_u64().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -200,17 +205,20 @@ pub(crate) struct VideoElement {
 impl Element for VideoElement {
     const ID: ElementType = ElementType::Video;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut pixel_width = None;
         let mut pixel_height = None;
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::PixelWidth => {
-                    pixel_width = Some(it.read_u64()? as u16);
+                    pixel_width = Some(it.read_u64().await? as u16);
                 }
                 ElementType::PixelHeight => {
-                    pixel_height = Some(it.read_u64()? as u16);
+                    pixel_height = Some(it.read_u64().await? as u16);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -230,28 +238,31 @@ pub(crate) struct BlockAdditionMappingElement {
 impl Element for BlockAdditionMappingElement {
     const ID: ElementType = ElementType::BlockAdditionMapping;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         // There can be many BlockAdditionMapping elements with DolbyVisionConfiguration in a single track
         // BlockAddIdType FourCC string allows to determine the type of DolbyVisionConfiguration extra data
         let mut extra_data = None;
         let mut block_add_id_type = String::new();
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::BlockAddIdType => {
-                    block_add_id_type = it.read_string()?;
+                    block_add_id_type = it.read_string().await?;
                 }
                 ElementType::DolbyVisionConfiguration => match block_add_id_type.as_str() {
                     "dvcC" | "dvvC" => {
                         extra_data = Some(VideoExtraData {
                             id: VIDEO_EXTRA_DATA_ID_DOLBY_VISION_CONFIG,
-                            data: it.read_boxed_slice()?,
+                            data: it.read_boxed_slice().await?,
                         });
                     }
                     "hvcE" => {
                         extra_data = Some(VideoExtraData {
                             id: VIDEO_EXTRA_DATA_ID_DOLBY_VISION_EL_HEVC,
-                            data: it.read_boxed_slice()?,
+                            data: it.read_boxed_slice().await?,
                         });
                     }
                     _ => {}
@@ -274,13 +285,16 @@ pub(crate) struct SeekHeadElement {
 impl Element for SeekHeadElement {
     const ID: ElementType = ElementType::SeekHead;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut seeks = Vec::new();
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::Seek => {
-                    seeks.push(it.read_element_data()?);
+                    seeks.push(it.read_element_data().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -301,17 +315,20 @@ pub(crate) struct SeekElement {
 impl Element for SeekElement {
     const ID: ElementType = ElementType::Seek;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut seek_id = None;
         let mut seek_position = None;
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::SeekId => {
-                    seek_id = Some(it.read_u64()?);
+                    seek_id = Some(it.read_u64().await?);
                 }
                 ElementType::SeekPosition => {
-                    seek_position = Some(it.read_u64()?);
+                    seek_position = Some(it.read_u64().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -334,8 +351,11 @@ pub(crate) struct TracksElement {
 impl Element for TracksElement {
     const ID: ElementType = ElementType::Tracks;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
-        Ok(Self { tracks: it.read_elements()? })
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
+        Ok(Self { tracks: it.read_elements().await? })
     }
 }
 
@@ -354,7 +374,10 @@ pub(crate) struct EbmlHeaderElement {
 impl Element for EbmlHeaderElement {
     const ID: ElementType = ElementType::Ebml;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut version = None;
         let mut read_version = None;
         let mut max_id_length = None;
@@ -363,28 +386,28 @@ impl Element for EbmlHeaderElement {
         let mut doc_type_version = None;
         let mut doc_type_read_version = None;
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::EbmlVersion => {
-                    version = Some(it.read_u64()?);
+                    version = Some(it.read_u64().await?);
                 }
                 ElementType::EbmlReadVersion => {
-                    read_version = Some(it.read_u64()?);
+                    read_version = Some(it.read_u64().await?);
                 }
                 ElementType::EbmlMaxIdLength => {
-                    max_id_length = Some(it.read_u64()?);
+                    max_id_length = Some(it.read_u64().await?);
                 }
                 ElementType::EbmlMaxSizeLength => {
-                    max_size_length = Some(it.read_u64()?);
+                    max_size_length = Some(it.read_u64().await?);
                 }
                 ElementType::DocType => {
-                    doc_type = Some(it.read_string()?);
+                    doc_type = Some(it.read_string().await?);
                 }
                 ElementType::DocTypeVersion => {
-                    doc_type_version = Some(it.read_u64()?);
+                    doc_type_version = Some(it.read_u64().await?);
                 }
                 ElementType::DocTypeReadVersion => {
-                    doc_type_read_version = Some(it.read_u64()?);
+                    doc_type_read_version = Some(it.read_u64().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -417,29 +440,32 @@ pub(crate) struct InfoElement {
 impl Element for InfoElement {
     const ID: ElementType = ElementType::Info;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut duration = None;
         let mut timestamp_scale = None;
         let mut title = None;
         let mut muxing_app = None;
         let mut writing_app = None;
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::TimestampScale => {
-                    timestamp_scale = Some(it.read_u64()?);
+                    timestamp_scale = Some(it.read_u64().await?);
                 }
                 ElementType::Duration => {
-                    duration = Some(it.read_f64()?);
+                    duration = Some(it.read_f64().await?);
                 }
                 ElementType::Title => {
-                    title = Some(it.read_string()?);
+                    title = Some(it.read_string().await?);
                 }
                 ElementType::MuxingApp => {
-                    muxing_app = Some(it.read_string()?);
+                    muxing_app = Some(it.read_string().await?);
                 }
                 ElementType::WritingApp => {
-                    writing_app = Some(it.read_string()?);
+                    writing_app = Some(it.read_string().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -466,8 +492,11 @@ pub(crate) struct CuesElement {
 impl Element for CuesElement {
     const ID: ElementType = ElementType::Cues;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
-        Ok(Self { points: it.read_elements()? })
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
+        Ok(Self { points: it.read_elements().await? })
     }
 }
 
@@ -481,14 +510,17 @@ pub(crate) struct CuePointElement {
 impl Element for CuePointElement {
     const ID: ElementType = ElementType::CuePoint;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut time = None;
         let mut pos = None;
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
-                ElementType::CueTime => time = Some(it.read_u64()?),
+                ElementType::CueTime => time = Some(it.read_u64().await?),
                 ElementType::CueTrackPositions => {
-                    pos = Some(it.read_element_data()?);
+                    pos = Some(it.read_element_data().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -513,16 +545,19 @@ pub(crate) struct CueTrackPositionsElement {
 impl Element for CueTrackPositionsElement {
     const ID: ElementType = ElementType::CueTrackPositions;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut track = None;
         let mut pos = None;
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::CueTrack => {
-                    track = Some(it.read_u64()?);
+                    track = Some(it.read_u64().await?);
                 }
                 ElementType::CueClusterPosition => {
-                    pos = Some(it.read_u64()?);
+                    pos = Some(it.read_u64().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -546,19 +581,22 @@ pub(crate) struct BlockGroupElement {
 impl Element for BlockGroupElement {
     const ID: ElementType = ElementType::BlockGroup;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut data = None;
         let mut block_duration = None;
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::DiscardPadding => {
-                    let _nanos = it.read_data()?;
+                    let _nanos = it.read_data().await?;
                 }
                 ElementType::Block => {
-                    data = Some(it.read_boxed_slice()?);
+                    data = Some(it.read_boxed_slice().await?);
                 }
                 ElementType::BlockDuration => {
-                    block_duration = Some(it.read_u64()?);
+                    block_duration = Some(it.read_u64().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -590,15 +628,18 @@ pub(crate) struct ClusterElement {
 impl Element for ClusterElement {
     const ID: ElementType = ElementType::Cluster;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        header: ElementHeader,
+    ) -> Result<Self> {
         let pos = it.pos();
         let mut timestamp = None;
         let mut blocks = Vec::new();
         let has_size = header.end().is_some();
 
-        fn read_block(data: &[u8], timestamp: u64, offset: u64) -> Result<BlockElement> {
+        async fn read_block(data: &[u8], timestamp: u64, offset: u64) -> Result<BlockElement> {
             let mut reader = BufReader::new(data);
-            let track = read_unsigned_vint(&mut reader)?;
+            let track = read_unsigned_vint(&mut reader).await?;
             let rel_ts = reader.read_be_u16()? as i16;
             let timestamp = calc_abs_block_timestamp(timestamp, rel_ts);
             Ok(BlockElement { track, timestamp, pos: offset })
@@ -608,18 +649,20 @@ impl Element for ClusterElement {
             timestamp.ok_or(Error::DecodeError("mkv: missing timestamp for a cluster"))
         }
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::Timestamp => {
-                    timestamp = Some(it.read_u64()?);
+                    timestamp = Some(it.read_u64().await?);
                 }
                 ElementType::BlockGroup => {
-                    let group = it.read_element_data::<BlockGroupElement>()?;
-                    blocks.push(read_block(&group.data, get_timestamp(timestamp)?, header.pos)?);
+                    let group = it.read_element_data::<BlockGroupElement>().await?;
+                    blocks.push(
+                        read_block(&group.data, get_timestamp(timestamp)?, header.pos).await?,
+                    );
                 }
                 ElementType::SimpleBlock => {
-                    let data = it.read_boxed_slice()?;
-                    blocks.push(read_block(&data, get_timestamp(timestamp)?, header.pos)?);
+                    let data = it.read_boxed_slice().await?;
+                    blocks.push(read_block(&data, get_timestamp(timestamp)?, header.pos).await?);
                 }
                 _ if header.etype.is_top_level() && !has_size => break,
                 other => {
@@ -645,13 +688,16 @@ pub(crate) struct TagsElement {
 impl Element for TagsElement {
     const ID: ElementType = ElementType::Tags;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut tags = Vec::new();
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::Tag => {
-                    tags.push(it.read_element_data::<TagElement>()?);
+                    tags.push(it.read_element_data::<TagElement>().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -689,13 +735,16 @@ pub(crate) struct TagElement {
 impl Element for TagElement {
     const ID: ElementType = ElementType::Tag;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut simple_tags = Vec::new();
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::SimpleTag => {
-                    simple_tags.push(it.read_element_data::<SimpleTagElement>()?);
+                    simple_tags.push(it.read_element_data::<SimpleTagElement>().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -716,17 +765,20 @@ pub(crate) struct SimpleTagElement {
 impl Element for SimpleTagElement {
     const ID: ElementType = ElementType::SimpleTag;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut name = None;
         let mut value = None;
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::TagName => {
-                    name = Some(it.read_string()?);
+                    name = Some(it.read_string().await?);
                 }
                 ElementType::TagString | ElementType::TagBinary => {
-                    value = Some(it.read_data()?);
+                    value = Some(it.read_data().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -752,28 +804,31 @@ pub(crate) struct AttachedFileElement {
 impl Element for AttachedFileElement {
     const ID: ElementType = ElementType::AttachedFile;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut name = None;
         let mut desc = None;
         let mut media_type = None;
         let mut data = None;
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::FileDescription => {
-                    desc = Some(it.read_string()?);
+                    desc = Some(it.read_string().await?);
                 }
                 ElementType::FileName => {
-                    name = Some(it.read_string()?);
+                    name = Some(it.read_string().await?);
                 }
                 ElementType::FileMediaType => {
-                    media_type = Some(it.read_string()?);
+                    media_type = Some(it.read_string().await?);
                 }
                 ElementType::FileData => {
-                    data = Some(it.read_boxed_slice()?);
+                    data = Some(it.read_boxed_slice().await?);
                 }
                 ElementType::FileUid => {
-                    let _ = it.read_u64()?;
+                    let _ = it.read_u64().await?;
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -799,13 +854,16 @@ pub(crate) struct AttachmentsElement {
 impl Element for AttachmentsElement {
     const ID: ElementType = ElementType::Attachments;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut attached_files = Vec::new();
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::AttachedFile => {
-                    attached_files.push(it.read_element_data::<AttachedFileElement>()?);
+                    attached_files.push(it.read_element_data::<AttachedFileElement>().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -825,13 +883,16 @@ pub(crate) struct ChaptersElement {
 impl Element for ChaptersElement {
     const ID: ElementType = ElementType::Chapters;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut editions = Vec::new();
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::EditionEntry => {
-                    editions.push(it.read_element_data::<EditionEntryElement>()?);
+                    editions.push(it.read_element_data::<EditionEntryElement>().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -856,32 +917,35 @@ pub(crate) struct EditionEntryElement {
 impl Element for EditionEntryElement {
     const ID: ElementType = ElementType::EditionEntry;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut is_hidden = false;
         let mut is_default = false;
         let mut is_ordered = false;
         let mut display = Vec::new();
         let mut chapters = Vec::new();
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::EditionUid => {
-                    let _ = it.read_u64()?;
+                    let _ = it.read_u64().await?;
                 }
                 ElementType::EditionFlagHidden => {
-                    is_hidden = it.read_u64()? == 1;
+                    is_hidden = it.read_u64().await? == 1;
                 }
                 ElementType::EditionFlagDefault => {
-                    is_default = it.read_u64()? == 1;
+                    is_default = it.read_u64().await? == 1;
                 }
                 ElementType::EditionFlagOrdered => {
-                    is_ordered = it.read_u64()? == 1;
+                    is_ordered = it.read_u64().await? == 1;
                 }
                 ElementType::EditionDisplay => {
-                    display.push(it.read_element_data::<EditionDisplayElement>()?)
+                    display.push(it.read_element_data::<EditionDisplayElement>().await?)
                 }
                 ElementType::ChapterAtom => {
-                    chapters.push(it.read_element_data::<ChapterAtomElement>()?)
+                    chapters.push(it.read_element_data::<ChapterAtomElement>().await?)
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -946,17 +1010,20 @@ pub(crate) struct EditionDisplayElement {
 impl Element for EditionDisplayElement {
     const ID: ElementType = ElementType::EditionDisplay;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut name = None;
         let mut lang_bcp47 = None;
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::EditionString => {
-                    name = Some(it.read_string()?);
+                    name = Some(it.read_string().await?);
                 }
                 ElementType::EditionLanguageBcp47 => {
-                    lang_bcp47 = Some(it.read_string()?);
+                    lang_bcp47 = Some(it.read_string().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -986,7 +1053,10 @@ pub(crate) struct ChapterAtomElement {
 impl Element for ChapterAtomElement {
     const ID: ElementType = ElementType::ChapterAtom;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut is_enabled = false;
         let mut is_hidden = false;
         let mut time_start = None;
@@ -995,33 +1065,33 @@ impl Element for ChapterAtomElement {
         let mut display = Vec::new();
         let mut chapters = Vec::new();
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::ChapterUid => {}
                 ElementType::ChapterStringUid => {}
                 ElementType::ChapterTimeStart => {
-                    time_start = Some(it.read_u64()?);
+                    time_start = Some(it.read_u64().await?);
                 }
                 ElementType::ChapterTimeEnd => {
-                    time_end = Some(it.read_u64()?);
+                    time_end = Some(it.read_u64().await?);
                 }
                 ElementType::ChapterFlagEnabled => {
-                    is_enabled = it.read_u64()? == 1;
+                    is_enabled = it.read_u64().await? == 1;
                 }
                 ElementType::ChapterFlagHidden => {
-                    is_hidden = it.read_u64()? == 1;
+                    is_hidden = it.read_u64().await? == 1;
                 }
                 ElementType::ChapterDisplay => {
-                    display.push(it.read_element_data::<ChapterDisplayElement>()?);
+                    display.push(it.read_element_data::<ChapterDisplayElement>().await?);
                 }
                 ElementType::ChapterSkipType => {
-                    skip_type = match it.read_u64()? {
+                    skip_type = match it.read_u64().await? {
                         value @ 0..=6 => Some(value as u8),
                         _ => None,
                     };
                 }
                 ElementType::ChapterAtom => {
-                    chapters.push(it.read_element_data::<ChapterAtomElement>()?);
+                    chapters.push(it.read_element_data::<ChapterAtomElement>().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);
@@ -1138,25 +1208,28 @@ pub(crate) struct ChapterDisplayElement {
 impl Element for ChapterDisplayElement {
     const ID: ElementType = ElementType::ChapterDisplay;
 
-    fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         let mut name = None;
         let mut lang = None;
         let mut lang_bcp47 = None;
         let mut country = None;
 
-        while let Some(header) = it.read_header()? {
+        while let Some(header) = it.read_header().await? {
             match header.etype {
                 ElementType::ChapString => {
-                    name = Some(it.read_string()?);
+                    name = Some(it.read_string().await?);
                 }
                 ElementType::ChapLanguage => {
-                    lang = Some(it.read_string()?);
+                    lang = Some(it.read_string().await?);
                 }
                 ElementType::ChapLanguageBcp47 => {
-                    lang_bcp47 = Some(it.read_string()?);
+                    lang_bcp47 = Some(it.read_string().await?);
                 }
                 ElementType::ChapCountry => {
-                    country = Some(it.read_string()?);
+                    country = Some(it.read_string().await?);
                 }
                 other => {
                     log::debug!("ignored element {:?}", other);

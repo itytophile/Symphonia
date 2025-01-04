@@ -5,7 +5,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::io::SeekFrom;
+use std::io::{self, SeekFrom};
 use std::ops::{Deref, DerefMut};
 
 use symphonia_core::errors::{decode_error, seek_error, Error, Result, SeekErrorKind};
@@ -203,31 +203,62 @@ impl<'s> DerefMut for OwnedElementReader<'s> {
     }
 }
 
-/// An element reader for an underlying borrowed reader.
-struct BorrowedElementReader<'a, 's> {
-    reader: &'a mut MediaSourceStream<'s>,
+trait Dumb: ReadBytes {
+    fn is_seekable(&self) -> bool;
+
+    fn byte_len(&self) -> Option<u64>;
+
+    async fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64>;
 }
 
-impl<'a,'s> BorrowedElementReader<'a, 's> {
+impl<'s> Dumb for MediaSourceStream<'s> {
+    fn is_seekable(&self) -> bool {
+        self.is_seekable()
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        self.byte_len()
+    }
+
+    async fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        self.seek(pos).await
+    }
+}
+
+/// An element reader for an underlying borrowed reader.
+struct BorrowedElementReader<'a, B> {
+    reader: &'a mut B,
+}
+
+impl<'a, B> BorrowedElementReader<'a, B> {
     /// Create a new borrowing element reader.
-    pub(crate) fn new(reader: &'a mut MediaSourceStream<'s>) -> Self {
+    pub(crate) fn new(reader: &'a mut B) -> Self {
         Self { reader }
     }
 }
 
-impl<'a, 's> Deref for BorrowedElementReader<'a, 's> {
-    type Target = MediaSourceStream<'s>;
+impl<'a, B> Deref for BorrowedElementReader<'a, B> {
+    type Target = B;
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
         self.reader
     }
 }
 
-impl<'a, 's> DerefMut for BorrowedElementReader<'a, 's> {
+impl<'a, B> DerefMut for BorrowedElementReader<'a, B> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.reader
     }
+}
+
+impl<'a, B: Dumb> ElementReader for BorrowedElementReader<'a, B> {
+    type Inner = B;
+}
+
+pub(crate) trait ElementReader: DerefMut<Target = Self::Inner> {
+    /// The concrete type of the underlying reader implementing `ReadBytes`.
+    type Inner: Dumb;
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -250,7 +281,7 @@ pub struct ElementHeader {
 
 impl ElementHeader {
     /// Returns an iterator over child elements of the current element.
-    pub(crate) fn children<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(&self, reader: R) -> Result<ElementIterator<R>> {
+    pub(crate) fn children<R: ElementReader>(&self, reader: R) -> Result<ElementIterator<R>> {
         assert_eq!(reader.pos(), self.data_pos, "unexpected position");
         ElementIterator::new_of(reader, *self)
     }
@@ -267,12 +298,12 @@ impl ElementHeader {
 
 pub trait Element: Sized {
     const ID: ElementType;
-    async fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(it: ElementIterator<R>, header: ElementHeader) -> Result<Self>;
+    async fn read<R: ElementReader>(it: ElementIterator<R>, header: ElementHeader) -> Result<Self>;
 }
 
 impl ElementHeader {
     /// Reads a single EBML element header from the stream.
-    pub(crate) async fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(
+    pub(crate) async fn read<R: ElementReader>(
         reader: &mut R,
         depth: u8,
     ) -> Result<(ElementHeader, bool)> {
@@ -306,7 +337,10 @@ pub(crate) struct EbmlElement {
 impl Element for EbmlElement {
     const ID: ElementType = ElementType::Ebml;
 
-    async fn read<'s, R: DerefMut<Target = MediaSourceStream<'s>>>(mut it: ElementIterator<R>, _header: ElementHeader) -> Result<Self> {
+    async fn read<R: ElementReader>(
+        mut it: ElementIterator<R>,
+        _header: ElementHeader,
+    ) -> Result<Self> {
         Ok(Self { header: it.read_element_data::<EbmlHeaderElement>().await? })
     }
 }
@@ -323,7 +357,7 @@ pub(crate) struct ElementIterator<R> {
     depth: u8,
 }
 
-impl<'a, R: DerefMut<Target = MediaSourceStream<'a>>> ElementIterator<R> {
+impl<R: ElementReader> ElementIterator<R> {
     /// Creates a new iterator over elements starting from the current stream position.
     pub(crate) fn new(reader: R, end: Option<u64>) -> Self {
         // Creates a new iterator over elements starting from the given stream position.
@@ -349,8 +383,7 @@ impl<'a, R: DerefMut<Target = MediaSourceStream<'a>>> ElementIterator<R> {
     }
 
     /// Seek to a specified offset inside of the stream.
-    pub(crate) async fn seek(&mut self, pos: u64) -> Result<()>
-    {
+    pub(crate) async fn seek(&mut self, pos: u64) -> Result<()> {
         let current_pos = self.pos();
         self.current = None;
         if self.reader.is_seekable() {

@@ -284,7 +284,8 @@ impl<'s> AsyncMkvReader<'s> {
             while let Some(frame) = self.frames.front() {
                 if frame.timestamp + frame.duration >= ts && frame.track == track_id {
                     break 'out frame.timestamp;
-                } else {
+                }
+                else {
                     self.frames.pop_front();
                 }
             }
@@ -303,7 +304,8 @@ impl<'s> AsyncMkvReader<'s> {
 
         let result = if self.clusters.is_empty() {
             self.seek_track_by_ts_forward(track_id, ts).await
-        } else {
+        }
+        else {
             let mut target_cluster = None;
             for cluster in &self.clusters {
                 if cluster.timestamp > ts {
@@ -459,7 +461,10 @@ impl<'s> ProbeableFormat<'s> for AsyncMkvReader<'_> {
     where
         Self: Sized,
     {
-        async move { Ok(Box::new(AsyncMkvReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>) }.boxed()
+        async move {
+            Ok(Box::new(AsyncMkvReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
+        }
+        .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
