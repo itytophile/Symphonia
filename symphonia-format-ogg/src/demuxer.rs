@@ -53,34 +53,41 @@ pub struct AsyncOggReader<'s> {
 
 pub type OggReader<'s> = BlockingFormatReader<AsyncOggReader<'s>>;
 
-impl<'s> AsyncOggReader<'s> {
-    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
-        // A seekback buffer equal to the maximum OGG page size is required for this reader.
-        mss.ensure_seekback_buffer(OGG_PAGE_MAX_SIZE);
+pub fn try_new(mss: MediaSourceStream<'_>, opts: FormatOptions) -> Result<OggReader<'_>> {
+    Ok(BlockingFormatReader::new(try_new_async(mss.into_inner(), opts).now_or_never().unwrap()?))
+}
 
-        let pages = PageReader::try_new(&mut mss).await?;
+pub async fn try_new_async(
+    mut mss: AsyncMediaSourceStream<'_>,
+    opts: FormatOptions,
+) -> Result<AsyncOggReader<'_>> {
+    // A seekback buffer equal to the maximum OGG page size is required for this reader.
+    mss.ensure_seekback_buffer(OGG_PAGE_MAX_SIZE);
 
-        if !pages.header().is_first_page {
-            return unsupported_error("ogg: page is not marked as first");
-        }
+    let pages = PageReader::try_new(&mut mss).await?;
 
-        let mut ogg = AsyncOggReader {
-            reader: mss,
-            tracks: Default::default(),
-            chapters: opts.external_data.chapters,
-            metadata: opts.external_data.metadata.unwrap_or_default(),
-            streams: Default::default(),
-            enable_gapless: opts.enable_gapless,
-            pages,
-            phys_byte_range_start: 0,
-            phys_byte_range_end: None,
-        };
-
-        ogg.start_new_physical_stream().await?;
-
-        Ok(ogg)
+    if !pages.header().is_first_page {
+        return unsupported_error("ogg: page is not marked as first");
     }
 
+    let mut ogg = AsyncOggReader {
+        reader: mss,
+        tracks: Default::default(),
+        chapters: opts.external_data.chapters,
+        metadata: opts.external_data.metadata.unwrap_or_default(),
+        streams: Default::default(),
+        enable_gapless: opts.enable_gapless,
+        pages,
+        phys_byte_range_start: 0,
+        phys_byte_range_end: None,
+    };
+
+    ogg.start_new_physical_stream().await?;
+
+    Ok(ogg)
+}
+
+impl<'s> AsyncOggReader<'s> {
     async fn read_page(&mut self) -> Result<()> {
         // Try reading pages until a page is successfully read, or an IO error.
         loop {
@@ -432,10 +439,8 @@ impl<'s> ProbeableFormat<'s> for AsyncOggReader<'_> {
         mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
-        async move {
-            Ok(Box::new(AsyncOggReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
-        }
-        .boxed()
+        async move { Ok(Box::new(try_new_async(mss, opts).await?) as Box<dyn AsyncFormatReader>) }
+            .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
