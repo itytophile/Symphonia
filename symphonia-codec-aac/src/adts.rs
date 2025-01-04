@@ -6,7 +6,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use futures_util::future::BoxFuture;
-use futures_util::io::AllowStdIo;
 use futures_util::FutureExt;
 use symphonia_core::errors::{unsupported_error, Error};
 use symphonia_core::{async_trait, support_format};
@@ -91,19 +90,8 @@ pub async fn try_new_async(
     })
 }
 
-pub fn try_new<'s>(
-    source: impl MediaSource + 's,
-    options: MediaSourceStreamOptions,
-    opts: FormatOptions,
-) -> Result<AdtsReader<'s>> {
-    Ok(BlockingFormatReader::new(
-        try_new_async(
-            AsyncMediaSourceStream::new(Box::pin(AllowStdIo::new(source)), options),
-            opts,
-        )
-        .now_or_never()
-        .unwrap()?,
-    ))
+pub fn try_new(source: MediaSourceStream<'_>, opts: FormatOptions) -> Result<AdtsReader<'_>> {
+    Ok(BlockingFormatReader::new(try_new_async(source.into_inner(), opts).now_or_never().unwrap()?))
 }
 
 impl Scoreable for AsyncAdtsReader<'_> {

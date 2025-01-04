@@ -21,4 +21,4 @@ pub mod adts;
 mod common;
 
 pub use aac::AacDecoder;
-pub use adts::AdtsReader;
+pub use adts::{try_new, try_new_async, AdtsReader, AsyncAdtsReader};
