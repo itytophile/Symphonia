@@ -95,10 +95,8 @@ impl<'s> ProbeableFormat<'s> for AsyncMpaReader<'_> {
         mss: AsyncMediaSourceStream<'s>,
         opts: FormatOptions,
     ) -> BoxFuture<'s, Result<Box<dyn AsyncFormatReader + 's>>> {
-        async move {
-            Ok(Box::new(AsyncMpaReader::try_new(mss, opts).await?) as Box<dyn AsyncFormatReader>)
-        }
-        .boxed()
+        async move { Ok(Box::new(try_new_async(mss, opts).await?) as Box<dyn AsyncFormatReader>) }
+            .boxed()
     }
 
     fn probe_data() -> &'static [ProbeFormatData] {
@@ -404,87 +402,94 @@ impl AsyncFormatReader for AsyncMpaReader<'_> {
     }
 }
 
-impl<'s> AsyncMpaReader<'s> {
-    pub async fn try_new(mut mss: AsyncMediaSourceStream<'s>, opts: FormatOptions) -> Result<Self> {
-        // Try to read the first MPEG frame.
-        let (header, packet) = read_mpeg_frame_strict(&mut mss).await?;
+pub fn try_new(mss: MediaSourceStream<'_>, opts: FormatOptions) -> Result<MpaReader<'_>> {
+    Ok(BlockingFormatReader::new(try_new_async(mss.into_inner(), opts).now_or_never().unwrap()?))
+}
 
-        // Use the header to populate the codec parameters.
-        let mut codec_params = AudioCodecParameters::new();
+pub async fn try_new_async(
+    mut mss: AsyncMediaSourceStream<'_>,
+    opts: FormatOptions,
+) -> Result<AsyncMpaReader<'_>> {
+    // Try to read the first MPEG frame.
+    let (header, packet) = read_mpeg_frame_strict(&mut mss).await?;
 
-        codec_params
-            .for_codec(header.codec())
-            .with_sample_rate(header.sample_rate)
-            .with_channels(header.channel_mode.channels());
+    // Use the header to populate the codec parameters.
+    let mut codec_params = AudioCodecParameters::new();
 
-        // Create the track.
-        let mut track = Track::new(0);
+    codec_params
+        .for_codec(header.codec())
+        .with_sample_rate(header.sample_rate)
+        .with_channels(header.channel_mode.channels());
 
-        track.with_codec_params(CodecParameters::Audio(codec_params));
+    // Create the track.
+    let mut track = Track::new(0);
 
-        // Check if there is a Xing/Info tag contained in the first frame.
-        if let Some(info_tag) = try_read_info_tag(&packet, &header).await {
-            // The LAME tag contains ReplayGain and padding information.
-            let (delay, padding) = if let Some(lame_tag) = info_tag.lame {
-                track.with_delay(lame_tag.enc_delay).with_padding(lame_tag.enc_padding);
+    track.with_codec_params(CodecParameters::Audio(codec_params));
 
-                (lame_tag.enc_delay, lame_tag.enc_padding)
-            }
-            else {
-                (0, 0)
-            };
+    // Check if there is a Xing/Info tag contained in the first frame.
+    if let Some(info_tag) = try_read_info_tag(&packet, &header).await {
+        // The LAME tag contains ReplayGain and padding information.
+        let (delay, padding) = if let Some(lame_tag) = info_tag.lame {
+            track.with_delay(lame_tag.enc_delay).with_padding(lame_tag.enc_padding);
 
-            // The base Xing/Info tag may contain the number of frames.
-            if let Some(num_mpeg_frames) = info_tag.num_frames {
-                info!("using xing header for duration");
-
-                let num_frames = u64::from(num_mpeg_frames) * header.duration();
-
-                // Adjust for gapless playback.
-                if opts.enable_gapless {
-                    track.with_num_frames(num_frames - u64::from(delay) - u64::from(padding));
-                }
-                else {
-                    track.with_num_frames(num_frames);
-                }
-            }
-        }
-        else if let Some(vbri_tag) = try_read_vbri_tag(&packet, &header) {
-            info!("using vbri header for duration");
-
-            let num_frames = u64::from(vbri_tag.num_mpeg_frames) * header.duration();
-
-            // Check if there is a VBRI tag.
-            track.with_num_frames(num_frames);
+            (lame_tag.enc_delay, lame_tag.enc_padding)
         }
         else {
-            // The first frame was not a Xing/Info header, rewind back to the start of the frame so
-            // that it may be decoded.
-            mss.seek_buffered_rev(MPEG_HEADER_LEN + header.frame_size);
+            (0, 0)
+        };
 
-            // Likely not a VBR file, so estimate the duration if seekable.
-            if mss.is_seekable() {
-                info!("estimating duration from bitrate, may be inaccurate for vbr files");
+        // The base Xing/Info tag may contain the number of frames.
+        if let Some(num_mpeg_frames) = info_tag.num_frames {
+            info!("using xing header for duration");
 
-                if let Some(n_mpeg_frames) = estimate_num_mpeg_frames(&mut mss).await {
-                    track.with_num_frames(n_mpeg_frames * header.duration());
-                }
+            let num_frames = u64::from(num_mpeg_frames) * header.duration();
+
+            // Adjust for gapless playback.
+            if opts.enable_gapless {
+                track.with_num_frames(num_frames - u64::from(delay) - u64::from(padding));
+            }
+            else {
+                track.with_num_frames(num_frames);
             }
         }
+    }
+    else if let Some(vbri_tag) = try_read_vbri_tag(&packet, &header) {
+        info!("using vbri header for duration");
 
-        let first_packet_pos = mss.pos();
+        let num_frames = u64::from(vbri_tag.num_mpeg_frames) * header.duration();
 
-        Ok(Self {
-            reader: mss,
-            tracks: vec![track],
-            chapters: opts.external_data.chapters,
-            metadata: opts.external_data.metadata.unwrap_or_default(),
-            enable_gapless: opts.enable_gapless,
-            first_packet_pos,
-            next_packet_ts: 0,
-        })
+        // Check if there is a VBRI tag.
+        track.with_num_frames(num_frames);
+    }
+    else {
+        // The first frame was not a Xing/Info header, rewind back to the start of the frame so
+        // that it may be decoded.
+        mss.seek_buffered_rev(MPEG_HEADER_LEN + header.frame_size);
+
+        // Likely not a VBR file, so estimate the duration if seekable.
+        if mss.is_seekable() {
+            info!("estimating duration from bitrate, may be inaccurate for vbr files");
+
+            if let Some(n_mpeg_frames) = estimate_num_mpeg_frames(&mut mss).await {
+                track.with_num_frames(n_mpeg_frames * header.duration());
+            }
+        }
     }
 
+    let first_packet_pos = mss.pos();
+
+    Ok(AsyncMpaReader {
+        reader: mss,
+        tracks: vec![track],
+        chapters: opts.external_data.chapters,
+        metadata: opts.external_data.metadata.unwrap_or_default(),
+        enable_gapless: opts.enable_gapless,
+        first_packet_pos,
+        next_packet_ts: 0,
+    })
+}
+
+impl<'s> AsyncMpaReader<'s> {
     /// Seeks the media source stream to a byte position roughly where the packet with the required
     /// timestamp should be located.
     async fn preseek_coarse(&mut self, required_ts: u64, duration: Option<u64>) -> Result<()> {
